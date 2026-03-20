@@ -1,0 +1,36 @@
+# --- MATLAB ---
+# Các file đồ họa và dữ liệu tạm thời
+*.asv
+*.m~
+*.slxc
+*.mex*
+*.p
+*.pcode
+*.fig
+
+# Thư mục chứa code được sinh ra tự động (Simulink/Codegen)
+slprj/
+codegeneration/
+*_ert_rtw/
+*_grt_rtw/
+
+# Log và dữ liệu crash
+matlab_crash_dump.*
+java.log.*
+
+# --- VS Code ---
+.vscode/
+# Nếu bạn muốn giữ lại file task.json hoặc launch.json để share với team, 
+# hãy bỏ comment dòng bên dưới:
+# !.vscode/launch.json
+
+# --- Claude / AI Tools ---
+.claude/
+
+# --- Hệ thống & Khác ---
+.DS_Store
+Thumbs.db
+node_modules/
+*.log
+*.bak
+*.tmp
