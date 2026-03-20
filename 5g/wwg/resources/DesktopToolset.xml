@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2020-2024 The MathWorks, Inc. -->
+<!-- THIS FILE CONTRIBUTES TO THE MATLAB APPS GALLERY WHICH IS CAREFULLY CURATED -->
+<!-- ADDITIONS AND CHANGES MUST GO THROUGH A DESIGN REVIEW PROCESS WITH SENIOR MANGEMENT -->
+<!-- THIS PROCESS IS MANAGED BY THE MATLAB DESKTOP TEAM. CONSULT THE TOOLSTRIP GUIDELINES TO GET STARTED -->
+<toolset id="wwg_toolset" message_catalog="nr5g:desktoptoolset" contents_path="../5g">
+    <tool id="5gWaveformGenerator">
+        <icon filename="5G_logo_16.png" path="../shared_wwg_wwa/icons" id="5gWaveformGeneratorApp"/>
+        <icon filename="5G_logo_24.png" path="../../shared/wirelessappcontainer/+wirelessAppContainer/icons" />
+        <callback>wirelessWaveformGenerator('Downlink')</callback>
+        <capability>
+            <localClient>false</localClient>  <!-- false = visible in MATLAB online -->
+        </capability>
+        <parent_tool id="signal_products" toolset_id="apps_toolset" />
+    </tool>
+</toolset>

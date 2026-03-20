@@ -1,0 +1,421 @@
+{
+    "wirelessNetworkSimulator.addChannelModel":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessNetworkSimulator"},
+            {"name":"customChannelFcn", "kind":"required", "type":["function_handle"]}
+        ]
+    },
+    "wirelessNetworkSimulator.addNodes":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessNetworkSimulator"},
+            {"name":"nodes", "kind":"required", "type":["wirelessnetwork.internal.wirelessNode"]}
+        ]
+    },
+    "wirelessNetworkSimulator.run":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessNetworkSimulator"},
+            {"name":"simulationDuration", "kind":"required", "type":["numeric", "scalar"]}
+        ]
+    },
+    "wirelessNetworkSimulator.scheduleAction":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessNetworkSimulator"},
+            {"name":"callbackFcn", "kind":"required", "type":["function_handle"]},
+            {"name":"userData", "kind":"required", "type":["struct"]},
+            {"name":"callAt", "kind":"required", "type":["numeric", "scalar"]},
+            {"name":"periodicity", "kind":"optional", "type":["numeric", "scalar"]}
+        ]
+    },
+    "wirelessNetworkSimulator.cancelAction":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessNetworkSimulator"},
+            {"name":"actionIdentifier", "kind":"required", "type":["numeric", "scalar"]}
+        ]
+    },
+"wlanNode":
+    {
+        "inputs":
+        [
+            {"name":"MACFrameAbstraction", "kind":"namevalue", "type":["logical", "scalar"]},
+            {"name":"PHYAbstractionMethod", "kind":"namevalue", "type":"choices={'tgax-evaluation-methodology', 'tgax-mac-calibration', 'none'}"},
+            {"name":"DeviceConfig", "kind":"namevalue", "type":"wlanDeviceConfig"},
+            {"kind":"properties","type":["wlanNode"]}
+        ]
+    },
+"wlanNode":
+    {
+        "inputs":
+        [
+            {"name":"MACFrameAbstraction", "kind":"namevalue", "type":["logical", "scalar"]},
+            {"name":"PHYAbstractionMethod", "kind":"namevalue", "type":"choices={'tgax-evaluation-methodology', 'tgax-mac-calibration', 'none'}"},
+            {"name":"DeviceConfig", "kind":"namevalue", "type":"wlanMultilinkDeviceConfig"},
+            {"kind":"properties","type":["wlanNode"]}
+        ]
+    },
+
+"wlanNode.associateStations":
+    {
+        "inputs":
+        [
+            {"name":"obj", "kind":"required", "type":["wlanNode"]},
+            {"name":"stationList", "kind":"required", "type":["wlanNode"]},
+            {"name":"BandAndChannel", "kind":"namevalue"},
+            {"name":"FullBufferTraffic", "kind":"namevalue", "type":"choices={'on', 'off', 'DL', 'UL'}"}
+        ]
+    },
+
+"wlanNode.addTrafficSource":
+    {
+        "inputs":
+        [
+            {"name":"obj", "kind":"required", "type":["wlanNode"]},
+            {"name":"trafficSource", "kind":"required", "type":["networkTrafficOnOff"]},
+            {"name":"DestinationNode", "kind":"namevalue", "type":["wlanNode"]},
+            {"name":"AccessCategory", "kind":"namevalue"}
+        ]
+    },
+
+"wlanNode.addMeshPath":
+    {
+        "inputs":
+        [
+            {"name":"obj", "kind":"required", "type":["wlanNode"]},
+            {"name":"destinationNode", "kind":"required", "type":["wlanNode"]},
+            {"name":"meshPathNode", "kind":"optional", "type":["wlanNode"]},
+            {"name":"SourceBandAndChannel", "kind":"namevalue"},
+            {"name":"MeshPathBandAndChannel", "kind":"namevalue"},
+            {"name":"DestinationBandAndChannel", "kind":"namevalue"}
+        ]
+    },
+
+"wlanNode.update":
+    {
+        "inputs":
+        [
+            {"name":"obj", "kind":"required", "type":["wlanNode"]},
+            {"name":"deviceID", "kind":"optional"},
+            {"name":"CWMin", "kind":"namevalue"},
+            {"name":"CWMax", "kind":"namevalue"},
+            {"name":"AIFS", "kind":"namevalue"}
+        ]
+    },
+
+"wlanNode.statistics":
+    {
+        "inputs":
+        [
+            {"name":"obj", "kind":"required", "type":["wlanNode"]},
+            {"name":"all", "kind":"optional", "type":"choices={'all'}"}
+        ]
+    },
+
+"bluetoothNode":
+    {
+        "inputs":
+        [
+            {"name":"Role", "kind":"optional", "type":"choices={'central', 'peripheral'}"},
+            {"name":"InterferenceFidelity", "kind":"namevalue", "type":"choices={1,0}"},
+            {"name":"InterferenceModeling", "kind":"namevalue", "type":"choices={'overlapping-adjacent-channel', 'non-overlapping-adjacent-channel'}"},
+            {"kind":"properties", "type":["bluetoothNode"]}
+        ]
+    },
+
+"bluetoothNode.addTrafficSource":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothNode"},
+            {"name":"trafficSource", "kind":"required", "type":["networkTrafficOnOff"]},
+            {"name":"DestinationNode", "kind":"namevalue", "type":["bluetoothNode"]}
+        ]
+    },
+
+"bluetoothNode.updateChannelList":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothNode"},
+            {"name":"newUsedChannelsList", "kind":"required", "type":["vector"]},
+            {"name":"destinationNode", "kind":"required", "type":["bluetoothNode"]}
+        ]
+    },
+
+"bluetoothNode.configureScheduler":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothNode"},
+            {"name":"MaxTransmissions", "kind":"namevalue"}
+        ]
+    },
+
+"bluetoothNode.statistics":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothNode"}
+        ]
+    },
+
+"bluetoothNode.kpi":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothNode"},
+            {"name":"destinationNode", "kind":"required", "type":"bluetoothNode"},
+            {"name":"kpiString", "kind":"required", "type":"choices={'throughput', 'PLR', 'PDR'}"},
+            {"name":"Layer", "kind":"namevalue", "type":"choices={'Baseband'}"}
+        ]
+    },
+
+"bluetoothLENode":
+    {
+        "inputs":
+        [
+            {"name":"Role", "kind":"optional", "type":"choices={'central', 'peripheral', 'isochronous-broadcaster', 'synchronized-receiver', 'broadcaster-observer', 'broadcaster', 'observer'}"},
+            {"name":"InterferenceFidelity", "kind":"namevalue", "type":"choices={1,0}"},
+            {"name":"InterferenceModeling", "kind":"namevalue", "type":"choices={'overlapping-adjacent-channel', 'non-overlapping-adjacent-channel'}"},
+            {"kind":"properties", "type":["bluetoothLENode"]}
+        ]
+    },
+
+"bluetoothLENode.runNode":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"},
+            {"name":"currentTime", "kind":"required", "type":["numeric"]}
+        ]
+    },
+
+"bluetoothLENode.addTrafficSource":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"},
+            {"name":"dataSource", "kind":"required", "type":["networkTrafficOnOff"]},
+            {"name":"DestinationNode", "kind":"namevalue", "type":["char","string","bluetoothLENode"]},
+            {"name":"CISConfig", "kind":"namevalue", "type":["bluetoothLECISConfig"]},
+            {"name":"SourceAddress", "kind":"namevalue",  "type":["char"]},
+            {"name":"DestinationAddress", "kind":"namevalue",  "type":["char"]},
+            {"name":"TTL", "kind":"namevalue",  "type":["numeric"]}
+        ]
+    },
+
+"bluetoothLENode.pushChannelData":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"},
+            {"name":"rxData", "kind":"required", "type":["struct"]}
+        ]
+    },
+
+"bluetoothLENode.channelInvokeDecision":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"},
+            {"name":"packet", "kind":"required", "type":["struct"]}
+        ]
+    },
+"bluetoothLENode.getCurrentTime":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"}
+        ]
+    },
+
+"bluetoothLENode.updateChannelList":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"},
+            {"name":"newUsedChannelsList", "kind":"required", "type":["vector"]},
+            {"name":"DestinationNode", "kind":"namevalue", "type":["numeric"]}
+        ]
+    },
+
+"bluetoothLENode.statistics":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"}
+        ]
+    },
+
+"bluetoothLENode.kpi":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"bluetoothLENode"},
+            {"name":"destinationNode", "kind":"required", "type":"bluetoothLENode"},
+            {"name":"kpiString", "kind":"required", "type":"choices={'throughput', 'latency', 'PLR', 'PDR'}"},
+            {"name":"Layer", "kind":"namevalue", "type":"choices={'App', 'LL'}"}
+        ]
+    },
+
+"nrUE":
+    {
+        "inputs":
+        [
+            {"name":"Name", "kind":"namevalue", "type":"string"},
+            {"name":"Position", "kind":"namevalue", "type":["numeric","ncols=3"]},
+            {"name":"NumTransmitAntennas", "kind":"namevalue", "type":"choices={1,2,4}"},
+            {"name":"NumReceiveAntennas", "kind":"namevalue", "type":"choices={1,2,4}"},
+            {"name":"TransmitPower", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"NoiseFigure", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"ReceiveGain", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"PHYAbstractionMethod", "kind":"namevalue", "type":"choices={'linkToSystemMapping','none'}"},
+            {"kind":"properties","type":["nrUE"]}
+        ]
+    },
+"nrUE.statistics":
+    {
+        "inputs":
+        [
+            {"name":"obj", "kind":"required", "type":["nrUE"]},
+            {"name":"all", "kind":"optional", "type":"choices={'all'}"}
+        ]
+    },
+ "nrGNB":
+    {
+        "inputs":
+        [
+            {"name":"Name", "kind":"namevalue", "type":"string"},
+            {"name":"Position", "kind":"namevalue", "type":["numeric","ncols=3"]},
+            {"name":"DuplexMode", "kind":"namevalue","type":"choices={'FDD','TDD'}"},
+            {"name":"DLULConfigTDD", "kind":"namevalue", "type":["struct","scalar"]},
+            {"name":"SubcarrierSpacing", "kind":"namevalue","type":"choices={15e3,30e3,60e3,120e3}"},
+            {"name":"CarrierFrequency", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"ChannelBandwidth", "kind":"namevalue", "type":"choices={5e6,10e6,15e6,20e6,25e6,30e6,35e6,40e6,45e6,50e6,60e6,70e6,80e6,90e6,100e6,200e6,400e6}"},
+            {"name":"NumResourceBlocks", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"NumTransmitAntennas", "kind":"namevalue", "type":"choices={1,2,4,8,16,32}"},
+            {"name":"NumReceiveAntennas", "kind":"namevalue", "type":"choices={1,2,4,8,16,32}"},
+            {"name":"TransmitPower", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"NoiseFigure", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"ReceiveGain", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"NumHARQ", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"PHYAbstractionMethod", "kind":"namevalue", "type":"choices={'linkToSystemMapping','none'}"},
+            {"name":"SRSPeriodicityUE", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"kind":"properties","type":["nrGNB"]}
+        ]
+    },
+    "nrGNB.connectUE":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"nrGNB"},
+            {"name":"UEs", "kind":"required", "type":"nrUE"},
+            {"name":"BSRPeriodicity", "kind":"namevalue", "type":"choices={1, 5, 10, 16, 20, 32, 40, 64, 80, 128, 160, 320, 640, 1280, 2560, Inf}"},
+            {"name":"CSIReportPeriodicity", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"FullBufferTraffic", "kind":"namevalue","type":["choices=[\"off\",\"on\",\"DL\",\"UL\"]"]},
+            {"name":"RLCBearerConfig", "kind":"namevalue", "type":"nrRLCBearerConfig"},
+            {"name":"CustomContext", "kind":"namevalue", "type":["struct"]}
+        ]
+    },
+    "nrGNB.configureULPowerControl":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"nrGNB"},
+            {"name":"PoPUSCH", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"Alpha", "kind":"namevalue","type":"choices={0, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1}"}
+        ]
+    },
+    "wirelessnetwork.internal.nrNode.addTrafficSource":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessnetwork.internal.nrNode"},
+            {"name":"trafficSource", "kind":"required", "type":[["networkTrafficFTP"], ["networkTrafficOnOff"], ["networkTrafficVideoConference"], ["networkTrafficVoIP"]]},
+            {"name":"DestinationNode", "kind":"namevalue", "type":"wirelessnetwork.internal.nrNode"},
+            {"name":"LogicalChannelID", "kind":"namevalue", "type":["numeric","scalar"]}
+        ]
+    },
+    "nrGNB.configureScheduler":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"nrGNB"},
+            {"name":"Scheduler", "kind":"namevalue", "type":"choices={'RoundRobin','ProportionalFair','BestCQI'}"},
+            {"name":"PFSWindowSize", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"ResourceAllocationType", "kind":"namevalue", "type":"choices={1,0}"},
+            {"name":"MaxNumUsersPerTTI", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"FixedMCSIndexDL", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"FixedMCSIndexUL", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"MUMIMOConfigDL", "kind":"namevalue", "type":["struct","scalar"]},
+            {"name":"LinkAdaptationConfigDL", "kind":"namevalue", "type":["struct","scalar"]},
+            {"name":"LinkAdaptationConfigUL", "kind":"namevalue", "type":["struct","scalar"]},
+            {"name":"CSIMeasurementSignalDL", "kind":"namevalue", "type":"choices={'CSI-RS', 'SRS'}"},
+            {"name":"RVSequence", "kind":"namevalue", "type":["numeric"]}
+        ]
+    },
+    "nrGNB.statistics":
+    {
+        "inputs":
+        [
+            {"name":"obj", "kind":"required", "type":["nrGNB"]},
+            {"name":"all", "kind":"optional", "type":"choices={'all'}"}
+        ]
+    },
+    "wirelessnetwork.internal.wirelessNode.addMobility":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessnetwork.internal.wirelessNode"},
+            {"name":"SpeedRange", "kind":"namevalue", "type":["numeric","vector"]},
+            {"name":"PauseDuration", "kind":"namevalue", "type":["numeric","scalar"]},
+            {"name":"BoundaryShape", "kind":"namevalue", "type":"choices={'rectangle','circle'}"},
+            {"name":"Bounds", "kind":"namevalue", "type":["numeric","vector"]}
+        ]
+    },
+    "wirelessTrafficViewer":
+    {
+        "inputs":
+        [
+            {"name":"ViewType", "kind":"namevalue", "type":"choices={'all', 'state-transition-plot', 'channel-occupancy-plot'}"},
+            {"name":"RefreshRate", "kind":"namevalue", "type":["numeric","scalar"]}
+        ]
+    },
+    "wirelessTrafficViewer.addNodes":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"wirelessTrafficViewer"},
+            {"name":"nodes", "kind":"required", "type":["wirelessnetwork.internal.wirelessNode"]}
+        ]
+    },
+    "nrGNB.kpi":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"nrGNB"},
+            {"name":"destinationNode", "kind":"required", "type":"nrUE"},
+            {"name":"kpiString", "kind":"required", "type":"choices={'latency','prbUsage','bler'}"},
+            {"name":"Layer", "kind":"namevalue", "type":"choices={'App','MAC','PHY'}"},
+            {"name":"LinkType", "kind":"namevalue", "type":"choices={'UL','DL'}"}
+        ]
+    },
+    "nrUE.kpi":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"nrUE"},
+            {"name":"destinationNode", "kind":"required", "type":"nrGNB"},
+            {"name":"kpiString", "kind":"required", "type":"choices={'latency','bler'}"},
+            {"name":"Layer", "kind":"namevalue", "type":"choices={'App','PHY'}"}
+        ]
+    }
+}

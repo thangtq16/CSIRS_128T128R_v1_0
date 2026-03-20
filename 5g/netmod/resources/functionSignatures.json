@@ -1,0 +1,50 @@
+{
+    "nrPCAPWriter":
+    {
+        "kind": "properties",
+        "type": ["nrPCAPWriter"],
+        "inputs":
+        [
+            {
+                "mutuallyExclusiveGroup":
+                [
+                    [
+                        {"name":"ByteOrder", "kind":"namevalue", "type":"choices={'little-endian','big-endian'}"},
+                        {"name":"FileComment", "kind":"namevalue"},
+                        {"name":"FileExtension", "kind":"namevalue", "type":"choices={'pcap','pcapng'}"},
+                        {"name":"FileName", "kind":"namevalue"},
+                        {"name":"Interface", "kind":"namevalue"}
+                    ],
+                    [
+                        {"name":"Interface", "kind":"namevalue"},
+                        {"name":"PCAPWriter", "kind":"namevalue"}
+                    ]
+                ]
+            }
+        ]
+    },
+    "nrPCAPWriter.write":
+    {
+        "inputs":
+        [
+            {"name":"target", "kind":"required", "type":"nrPCAPWriter"},
+            {"name":"Packet", "kind":"required", "type":[["numeric"], ["char"], ["string"]]},
+            {"name":"Timestamp", "kind":"required", "type":"numeric"},
+            {"name":"PacketComment", "kind":"namevalue", "type":"string"},
+            {"name":"PacketFormat", "kind":"namevalue", "type":"choices={'octets','bits'}"},
+            {"name":"PacketInfo", "kind":"namevalue", "type":"struct"}
+        ]
+    },
+    "nrRLCBearerConfig":
+    {
+        "inputs":
+        [
+            {"name":"RLCEntityType","kind":"namevalue","type":"choices={'UM','UMDL','UMUL','AM'}"},
+            {"name":"PrioritizedBitRate","kind":"namevalue","type":"choices={0,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536,Inf}"},
+            {"name":"BucketSizeDuration","kind":"namevalue","type":"choices={5,10,20,50,100,150,300,500,1000}"},
+            {"name":"PollPDU","kind":"namevalue","type":"choices={4,8,16,32,64,128,256,512,1024,2048,4096,6144,8192,12288,16384,20480,24576,28672,32768,40960,49152,57344,65536,Inf}"},
+            {"name":"PollByte","kind":"namevalue","type":"choices={1e3,2e3,5e3,8e3,10e3,15e3,25e3,50e3,75e3,100e3,125e3,250e3,375e3,500e3,750e3,1e6,1.25e6,1.5e6,2e6,3e6,4e6,4.5e6,5e6,5.5e6,6e6,6.5e6,7e6,7.5e6,8e6,9e6,10e6,11e6,12e6,13e6,14e6,15e6,16e6,17e6,18e6,20e6,25e6,30e6,40e6,Inf}"},
+            {"kind":"properties","type":["nrRLCBearerConfig"]}
+        ]
+    }
+}

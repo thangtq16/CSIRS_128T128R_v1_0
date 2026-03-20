@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(matlab -nodisplay -nosplash -batch \"run\\(''CSIRS_128T128R_v1_0.m''\\)\")",
+      "Bash(matlab -nodisplay -nosplash -batch \"f = what\\(''''5g''''\\); disp\\(f\\(1\\).m\\)\")",
+      "Bash(matlab -nodisplay -nosplash -batch \"help nrCSIReportCSIRS\")",
+      "Bash(matlab -nodisplay -nosplash -batch \"which nrCSIReportCSIRS\")",
+      "Bash(matlab -nodisplay -nosplash -batch \"nrCSIReportCSIRS\")",
+      "Bash(matlab -nodisplay -nosplash -batch \"p = path; disp\\(contains\\(p,''5g/5g''\\)\\)\")",
+      "Bash(matlab -nodisplay -nosplash -batch \"type\\(''''/usr/local/MATLAB/R2025b/toolbox/5g/5g/nrCSIReportCSIRS.m''''\\)\")"
+    ]
+  }
+}

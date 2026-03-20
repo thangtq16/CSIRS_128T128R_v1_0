@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!--Copyright 2022 The MathWorks, Inc. -->
+
+<!-- http://sharepoint/dev/pm/rm/supportsoftwareprocessesandreleases/supportsoftwareversioning/default.aspx -->
+
+<RTTPackageRepository>
+    <SupportPackage
+        name="WIRELESSNETWORK"
+        fullname="Communications Toolbox Wireless Network Simulation Library"
+        version="23.1.0"
+        basecode="WIRELESSNETWORK"
+        infotext="Features for multi-node wireless network simulation"
+        platform="PCWIN64,GLNXA64,MACI64,MACA64"
+        visible="1"
+        enable="1"
+        baseproduct="Communications Toolbox"
+        url="https://www.mathworks.com"
+        downloadurl=""
+        licenseurl=""
+        supportcategory="software"
+        postinstallcmd=""
+        preuninstallcmd="wirelessnetwork.internal.wirelessnetworkPreUninstallCmd"
+        folder="">
+    </SupportPackage>
+</RTTPackageRepository>

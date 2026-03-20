@@ -1,0 +1,34 @@
+{
+"networkTrafficOnOff":
+    {
+        "inputs":
+        [
+            {"kind":"properties", "type":["networkTrafficOnOff"]}
+        ]
+    },
+
+"networkTrafficVoIP":
+    {
+        "inputs":
+        [
+            {"kind":"properties", "type":["networkTrafficVoIP"]}
+        ]
+    },
+
+"networkTrafficFTP":
+    {
+        "inputs":
+        [
+            {"kind":"properties", "type":["networkTrafficFTP"]}
+        ]
+    },
+
+"networkTrafficVideoConference":
+    {
+        "inputs":
+        [
+            {"name":"FrameSizeMethod", "kind":"namevalue", "type":"choices={'WeibullDistribution','FixedSize'}"},
+            {"kind":"properties", "type":["networkTrafficVideoConference"]}
+        ]
+    }
+}
