@@ -17,6 +17,7 @@
 %  Date:   2026-03
 
 clear; close all; clc;
+%rng(100);  % Reproducible
 
 %% NR Cell Performance with Downlink MU-MIMO
 % Custom Path Library
@@ -442,17 +443,32 @@ title('|H_{actual}| (Rx0, Port0, 2 slots)');
 
 fprintf('\n=== CSI FEEDBACK ===\n');
 
-% --- Approach A: Per-resource PMI (using MATLAB built-in) ---
-fprintf('\n--- Approach A: Per-Resource PMI (32 ports each) ---\n');
+% --- Approach A: Per-resource PMI/RI/CQI (32 ports each) ---
+%
+%  Uses nr5g.internal.nrRISelect / nrCQISelect (TS 38.214 Type-I Single Panel)
+%  reportConfig must be a struct (not nrCSIReportConfig object)
+%  PanelDimensions = [N1, N2] for Type1SinglePanel: [8,2] → 2×8×2 = 32 ports
+%
+fprintf('\n--- Approach A: Per-Resource PMI/RI/CQI (32 ports each) ---\n');
 
-reportConfig = nrCSIReportConfig;
-reportConfig.PanelDimensions   = [1, 8, 2];        % [Ng=1, N1=8, N2=2]: 1x8x2x2pol = 32 ports
-reportConfig.CodebookType      = 'type1SinglePanel';
-reportConfig.CodebookMode      = 1;
-reportConfig.CQITable          = 'table1';
-reportConfig.SubbandSize       = 4;
+csiRepCfg = struct();
+csiRepCfg.NSizeBWP        = carrier.NSizeGrid;  % 52 PRBs
+csiRepCfg.NStartBWP       = 0;
+csiRepCfg.CodebookType    = 'Type1SinglePanel';
+csiRepCfg.PanelDimensions = [8, 2];             % N1=8, N2=2 → 32 ports
+csiRepCfg.CodebookMode    = 1;
+csiRepCfg.PMIMode         = 'Wideband';
+csiRepCfg.CQIMode         = 'Wideband';
+csiRepCfg.CQITable        = 'table1';
 
-dmrsConfig = nrPDSCHDMRSConfig;
+fprintf('  Config: Type-I Single Panel [N1=%d N2=%d] → %d ports/resource\n\n', ...
+    csiRepCfg.PanelDimensions(1), csiRepCfg.PanelDimensions(2), ...
+    2 * prod(csiRepCfg.PanelDimensions));
+fprintf('  %-4s  %-8s  %-4s  %-14s  %-14s  %-6s\n', ...
+    'Res', 'Ports', 'RI', 'PMI i1 (0-based)', 'PMI i2 (0-based)', 'CQI_WB');
+
+ri_per_res  = zeros(1, nResources);
+cqi_per_res = zeros(1, nResources);
 
 for resIdx = 1:nResources
     portStart = (resIdx - 1) * nPortsPerRes + 1;
@@ -462,14 +478,30 @@ for resIdx = 1:nResources
 
     symStart = slotNum * nSymPerSlot + 1;
     symEnd   = (slotNum + 1) * nSymPerSlot;
-    H_res = H_est_full(:, symStart:symEnd, :, portStart:portEnd);
+    H_res    = H_est_full(:, symStart:symEnd, :, portStart:portEnd);  % [624×14×4×32]
+    nVar_res = nVar_all(resIdx);
 
-    % myCSIReport: Rel-19 Type-I codebook not yet implemented.
-    % Replace with nrPMISelect + nrCQISelect wrapper when available.
-    warning('myCSIReport not implemented — skipping PMI/RI/CQI for Resource #%d.', resIdx-1);
-    fprintf('Resource #%d (ports %3d-%3d): PMI/RI/CQI skipped (stub)\n', ...
-        resIdx-1, portStart-1, portEnd-1);
+    % Step 1: RI selection
+    [ri, ~, ~] = nr5g.internal.nrRISelect(carrier, csirs{resIdx}, csiRepCfg, H_res, nVar_res);
+    ri_per_res(resIdx) = ri;
+
+    % Step 2: CQI + PMI (given RI)
+    [cqi, pmiSet, ~, ~] = nr5g.internal.nrCQISelect( ...
+        carrier, csirs{resIdx}, csiRepCfg, ri, H_res, nVar_res);
+
+    cqi_wb = cqi(1);                    % Wideband CQI (1st row)
+    cqi_per_res(resIdx) = cqi_wb;
+
+    % PMI indices: internal functions use 1-based → convert to 0-based (3GPP)
+    i1_str = mat2str(pmiSet.i1 - 1);
+    i2_str = mat2str(pmiSet.i2 - 1);
+
+    fprintf('  R%d    %3d-%-3d   %-4d  %-14s  %-14s  %-6d\n', ...
+        resIdx-1, portStart-1, portEnd-1, ri, i1_str, i2_str, cqi_wb);
 end
+
+fprintf('\n  Combined RI (min): %d   |   Avg CQI: %.1f\n', ...
+    min(ri_per_res), mean(cqi_per_res));
 
 % --- Approach B: Full 128-port SVD-based precoder ---
 fprintf('\n--- Approach B: Full 128-Port SVD Precoder ---\n');
