@@ -239,7 +239,7 @@ classdef nrCSIReportConfig < nr5g.internal.BWPSizeStart & comm.internal.ConfigBa
     % Constant, hidden properties
     properties (Constant,Hidden)
         CQITable_Values = {'table1','table2','table3','table4-r17'};
-        CodebookType_Values = {'type1SinglePanel','type1MultiPanel','type2','eType2'};
+        CodebookType_Values = {'type1SinglePanel','type1MultiPanel','type2','eType2','typeI-SinglePanel-r19'};
         CQIFormatIndicator_Values = {'wideband','subband'};
         PMIFormatIndicator_Values = {'wideband','subband'};
     end
@@ -469,9 +469,17 @@ function panelConfigTable = getSinglePanelConfigurations
             24         [12 1]   [4 1];
             32         [4 4]    [4 4];
             32         [8 2]    [4 4];
-            32         [16 1]   [4 1]};
+            32         [16 1]   [4 1];
+            % --- Rel-19 Refined Type I Single-Panel (TS 38.214 Table 5.2.2.2.1a-1) ---
+            % ThangTQ23_128T128R_Rel19
+            48         [8 3]    [4 4];
+            48         [6 4]    [4 4];
+            48         [16 2]   [4 4];
+            64         [8 4]    [4 4];
+            128        [16 4]   [4 4];
+            128        [8 8]    [4 4]};
     panelConfigTable = cell2table(panelConfigEntries,'VariableNames',{'Number of CSI-RS antenna ports','(N1,N2)','(O1,O2)'});
-    panelConfigTable.Properties.Description = 'TS 38.214 Table 5.2.2.2.1-2: Supported configurations of (N1,N2) and (O1,O2)';
+    panelConfigTable.Properties.Description = 'TS 38.214 Table 5.2.2.2.1-2 (Rel-15/16) + Table 5.2.2.2.1a-1 (Rel-19): Supported configurations of (N1,N2) and (O1,O2)';
 end
 
 function panelConfigTable = getMultiPanelConfigurations

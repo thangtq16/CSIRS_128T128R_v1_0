@@ -19,6 +19,11 @@
 clear; close all; clc;
 %rng(100);  % Reproducible
 
+%% Feature Flag: 3GPP Release 19 — Refined Type I Single-Panel Codebook
+%  Set to true  → uses TS 38.214 §5.2.2.2.1a (128-port, modeA)
+%  Set to false → uses Rel-15/16 per-32-port approach (Approach A)
+ThangTQ23_128T128R_Rel19 = true;  % toggle to false for Rel-15/16 fallback
+
 %% NR Cell Performance with Downlink MU-MIMO
 % Custom Path Library
 custom_lib_path_5g = fullfile(pwd, '5g');
@@ -432,24 +437,81 @@ title('|H_{actual}| (Rx0, Port0, 2 slots)');
 %  SECTION 10: CSI FEEDBACK - PMI, RI, CQI
 %  ========================================================================
 %
-%  Using Type I codebook (single panel) for 128 ports
-%  TS 38.214 S5.2.2.2.1
-%
-%  NOTE: nrPMISelect / nrCQISelect support up to 32 ports.
-%  For 128 ports, custom implementation or sub-array approach is needed.
-%  Two approaches are demonstrated here:
-%    (A) Per-resource PMI (32 ports each) - simple, uses built-in functions
-%    (B) Full 128-port PMI via wideband SVD - approximate, no codebook
+%  ThangTQ23_128T128R_Rel19 = true  → Approach C: nrPMIReport with
+%    typeI-SinglePanel-r19 codebook, full 128-port (TS 38.214 §5.2.2.2.1a)
+%  ThangTQ23_128T128R_Rel19 = false → Approach A: per-32-port (Rel-15/16)
+%                                    + Approach B: SVD baseline
 
 fprintf('\n=== CSI FEEDBACK ===\n');
 
-% --- Approach A: Per-resource PMI/RI/CQI (32 ports each) ---
+if ThangTQ23_128T128R_Rel19
+    %% --- Approach C: Full 128-port Rel-19 Refined Type I Codebook ---
+    fprintf('\n--- Approach C: Full 128-Port Rel-19 typeI-SinglePanel-r19 ---\n');
+
+    % Build wideband H averaged per-resource at its own slot symbols [nRx x nTx]
+    H_wb_r19 = zeros(nRxAntennas, nTxAntennas);
+    for resIdx = 1:nResources
+        pS = (resIdx-1)*nPortsPerRes + 1;  pE = resIdx*nPortsPerRes;
+        sS = slotAssign(resIdx)*nSymPerSlot + 1;
+        sE = (slotAssign(resIdx)+1)*nSymPerSlot;
+        H_wb_r19(:, pS:pE) = squeeze(mean(H_est_full(:,sS:sE,:,pS:pE), [1 2]));
+    end
+    % Reshape to [K x L x nRx x nTx] for nrPMIReport (use slot-0 grid size)
+    carrier.NSlot = 0;
+    nSC  = carrier.NSizeGrid * 12;
+    nSym = carrier.SymbolsPerSlot;
+    % Broadcast wideband H across all K subcarriers and L symbols
+    H_r19 = repmat(reshape(H_wb_r19.', 1, 1, nRxAntennas, nTxAntennas), [nSC nSym 1 1]);
+
+    % Configure Rel-19 report config (nrCSIReportConfig object — Ng=1, N1=16, N2=4)
+    repCfg_r19               = nrCSIReportConfig;
+    repCfg_r19.NSizeBWP      = carrier.NSizeGrid;
+    repCfg_r19.NStartBWP     = 0;
+    repCfg_r19.CodebookType  = 'typeI-SinglePanel-r19';
+    repCfg_r19.PanelDimensions = [1, 16, 4];   % Ng=1, N1=16, N2=4 → 128 ports
+    repCfg_r19.CodebookMode  = 1;              % modeA
+    repCfg_r19.PMIFormatIndicator = 'wideband';
+
+    nVar_r19 = mean(nVar_all);
+
+    % RI selection (try layers 1..4, pick best by SINR sum)
+    best_ri = 1;  best_sinr_sum = -Inf;
+    for ri_try = 1:min(nRxAntennas, 4)
+        try
+            [~, info_try] = nr5g.internal.nrPMIReport( ...
+                carrier, csirs{1}, repCfg_r19, ri_try, H_r19, nVar_r19);
+            sinr_sum = sum(info_try.SINRPerREPMI(:), 'omitnan');
+            if sinr_sum > best_sinr_sum
+                best_sinr_sum = sinr_sum;
+                best_ri       = ri_try;
+            end
+        catch
+        end
+    end
+
+    % Final PMI/CQI at selected RI
+    [pmiSet_r19, info_r19] = nr5g.internal.nrPMIReport( ...
+        carrier, csirs{1}, repCfg_r19, best_ri, H_r19, nVar_r19);
+
+    fprintf('  RI selected:      %d\n', best_ri);
+    fprintf('  PMI i1 (0-based): %s\n', mat2str(pmiSet_r19.i1 - 1));
+    fprintf('  PMI i2 (0-based): %s\n', mat2str(pmiSet_r19.i2 - 1));
+
+    % CQI from SINR (TS 38.214 Table 5.2.2.1-2)
+    cqi_tbl_r19 = [-6.7,-4.7,-2.3,0.2,2.4,4.7,6.9,9.3,10.7,12.2,14.1,15.6,18.0,20.3,22.7];
+    sinr_r19_dB = 10*log10(mean(info_r19.SINRPerREPMI, 1, 'omitnan'));
+    cqi_r19     = arrayfun(@(s) max(sum(s >= cqi_tbl_r19), 1), sinr_r19_dB);
+    fprintf('  Per-layer SINR:   [%s] dB\n', num2str(sinr_r19_dB, '%.1f '));
+    fprintf('  Per-layer CQI:    [%s]\n',    num2str(cqi_r19,     '%d '));
+
+else
+    % --- Approach A: Per-resource PMI/RI/CQI (32 ports each) ---
 %
 %  Uses nr5g.internal.nrRISelect / nrCQISelect (TS 38.214 Type-I Single Panel)
 %  reportConfig must be a struct (not nrCSIReportConfig object)
 %  PanelDimensions = [N1, N2] for Type1SinglePanel: [8,2] → 2×8×2 = 32 ports
 %
-fprintf('\n--- Approach A: Per-Resource PMI/RI/CQI (32 ports each) ---\n');
+fprintf('\n--- Approach A: Per-Resource PMI/RI/CQI (32 ports each) ---\n'); %#ok<UNRCH>
 
 csiRepCfg = struct();
 csiRepCfg.NSizeBWP        = carrier.NSizeGrid;  % 52 PRBs
@@ -562,10 +624,42 @@ for layer = 1:ri_svd
 end
 fprintf('Per-layer CQI: [%s]\n', num2str(cqi_svd.', '%d '));
 
+end  % if ThangTQ23_128T128R_Rel19
+
 %% ========================================================================
 %  SECTION 11: BEAMFORMING PATTERN VISUALIZATION
 %  ========================================================================
 
+% Section 11 uses SVD results — only available in Rel-15/16 path
+if ThangTQ23_128T128R_Rel19
+    % Rel-19 path: visualize Rel-19 codebook beam (first selected beam from PMI i1)
+    figure('Name', 'Beamforming Analysis (Rel-19)', 'Position', [100 100 1200 500]);
+    nV   = gnbArraySize(1);  nH = gnbArraySize(2);  nPol = gnbArraySize(3);
+    i11_best = pmiSet_r19.i1(1);  i12_best = pmiSet_r19.i1(2);
+    O1_viz = 4; O2_viz = 4;
+    N1_viz = 16; N2_viz = 4;
+    um = exp(2*pi*1i*i12_best*(0:N2_viz-1)/(O2_viz*N2_viz));
+    ul = exp(2*pi*1i*i11_best*(0:N1_viz-1)/(O1_viz*N1_viz)).';
+    vlm_best = reshape((ul.*um).',[],1);
+    w1_r19 = [vlm_best; exp(1i*pi*(pmiSet_r19.i2-1)/2)*vlm_best] / sqrt(2*nTxAntennas);
+    azAngles = -90:0.5:90;  d = 0.5;
+    beamPattern_r19 = zeros(length(azAngles),1);
+    for ai = 1:length(azAngles)
+        az = azAngles(ai)*pi/180;
+        a_h = exp(1j*2*pi*d*(0:nH-1).'*sin(az));
+        a_v = ones(nV,1);
+        a_full = kron(ones(nPol,1), kron(a_v, a_h));
+        beamPattern_r19(ai) = abs(a_full'*w1_r19)^2;
+    end
+    subplot(1,2,1);
+    plot(azAngles, 10*log10(beamPattern_r19/max(beamPattern_r19)), 'LineWidth', 1.5);
+    xlabel('Azimuth (degrees)'); ylabel('Normalized Gain (dB)');
+    title(sprintf('Rel-19 Beam (i11=%d, i12=%d, i2=%d)', i11_best, i12_best, pmiSet_r19.i2-1));
+    grid on; ylim([-30 0]);
+    subplot(1,2,2);
+    text(0.5,0.5,'SVD spectrum N/A (Rel-19 path)','HorizontalAlignment','center');
+    axis off;
+else
 % Visualize beam pattern from SVD precoder (first layer)
 figure('Name', 'Beamforming Analysis', 'Position', [100 100 1200 500]);
 
@@ -607,6 +701,8 @@ xlabel('Singular Value Index'); ylabel('Magnitude');
 title(sprintf('Channel Singular Values (RI=%d)', ri_svd));
 grid on;
 
+end  % if ThangTQ23_128T128R_Rel19 (Section 11)
+
 %% ========================================================================
 %  SECTION 12: SUMMARY
 %  ========================================================================
@@ -622,7 +718,15 @@ fprintf(' Channel:     CDL-C, DS=%.0fns, fD=%.0fHz\n', ...
     channel.DelaySpread*1e9, channel.MaximumDopplerShift);
 fprintf(' SNR:         %d dB\n', SNRdB);
 fprintf(' CE NMSE:     %.2f dB\n', 10*log10(mean(nmse_per_port)));
-fprintf(' SVD RI:      %d layers\n', ri_svd);
-fprintf(' SVD CQI:     [%s]\n', num2str(cqi_svd.', '%d '));
-fprintf(' Layer SINR:  [%s] dB\n', num2str(sinr_dB.', '%.1f '));
+if ThangTQ23_128T128R_Rel19
+    fprintf(' Codebook:    typeI-SinglePanel-r19 (TS 38.214 §5.2.2.2.1a)\n');
+    fprintf(' Rel-19 RI:   %d layers\n', best_ri);
+    fprintf(' Rel-19 CQI:  [%s]\n', num2str(cqi_r19, '%d '));
+    fprintf(' Layer SINR:  [%s] dB\n', num2str(sinr_r19_dB, '%.1f '));
+else
+    fprintf(' Codebook:    Type1SinglePanel Rel-15/16 (SVD baseline)\n'); %#ok<UNRCH>
+    fprintf(' SVD RI:      %d layers\n', ri_svd);
+    fprintf(' SVD CQI:     [%s]\n', num2str(cqi_svd.', '%d '));
+    fprintf(' Layer SINR:  [%s] dB\n', num2str(sinr_dB.', '%.1f '));
+end
 fprintf('======================================================\n');
