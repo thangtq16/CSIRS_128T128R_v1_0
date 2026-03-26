@@ -474,18 +474,26 @@ if ThangTQ23_128T128R_Rel19
 
     nVar_r19 = mean(nVar_all);
 
-    % RI selection (try layers 1..4, pick best by SINR sum)
-    best_ri = 1;  best_sinr_sum = -Inf;
+    % RI selection (try layers 1..4, pick best by total achievable rate)
+    % NOTE: must use log2(1+SINR) sum, NOT linear SINR sum.
+    % Linear SINR sum heavily biases toward RI=1 because rank-1 concentrates
+    % all power into one very high SINR value that dwarfs multi-layer sums.
+    best_ri = 1;  best_rate = -Inf;  best_rate_final = 0;
     for ri_try = 1:min(nRxAntennas, 4)
         try
             [~, info_try] = nr5g.internal.nrPMIReport( ...
                 carrier, csirs{1}, repCfg_r19, ri_try, H_r19, nVar_r19);
-            sinr_sum = sum(info_try.SINRPerREPMI(:), 'omitnan');
-            if sinr_sum > best_sinr_sum
-                best_sinr_sum = sinr_sum;
-                best_ri       = ri_try;
+            sinr_vals = info_try.SINRPerREPMI(:);
+            rate_sum  = sum(log2(1 + sinr_vals(isfinite(sinr_vals) & sinr_vals >= 0)));
+            sinr_db   = 10*log10(mean(sinr_vals(isfinite(sinr_vals) & sinr_vals > 0)));
+            fprintf('    RI=%d: avg SINR=%.1fdB, rate_sum=%.1f\n', ri_try, sinr_db, rate_sum);
+            if rate_sum > best_rate
+                best_rate       = rate_sum;
+                best_ri         = ri_try;
+                best_rate_final = rate_sum;
             end
-        catch
+        catch ME
+            fprintf('    [RI=%d failed: %s]\n', ri_try, ME.message);
         end
     end
 
@@ -503,6 +511,31 @@ if ThangTQ23_128T128R_Rel19
     cqi_r19     = arrayfun(@(s) max(sum(s >= cqi_tbl_r19), 1), sinr_r19_dB);
     fprintf('  Per-layer SINR:   [%s] dB\n', num2str(sinr_r19_dB, '%.1f '));
     fprintf('  Per-layer CQI:    [%s]\n',    num2str(cqi_r19,     '%d '));
+
+    % --- Channel rank analysis + approach comparison ---
+    % All computed from wideband H_wb_r19 [nRx x nTx] for fair comparison
+    [~, S_wb, ~] = svd(H_wb_r19, 'econ');
+    sv     = diag(S_wb);
+    snr_sv = sv.^2 / nVar_r19;
+    cap_sv = log2(1 + snr_sv);
+    cap_svd_wb = sum(cap_sv);
+
+    % Mode A capacity: use actual precoder W from info_r19
+    W_modeA   = info_r19.W;                           % [128 x best_ri]
+    H_eff_A   = H_wb_r19 * W_modeA;                   % [nRx x best_ri]
+    snr_A     = 1 / (nVar_r19 * best_ri);
+    cap_modeA = real(log2(det(eye(nRxAntennas) + snr_A * (H_eff_A * H_eff_A'))));
+
+    fprintf('\n  --- Channel Rank Analysis (wideband H SVD) ---\n');
+    fprintf('  %-6s  %-14s  %-12s  %-18s\n', 'SV #', 'Singular val', 'SNR (dB)', 'Capacity (bits/s/Hz)');
+    for k = 1:length(sv)
+        fprintf('  %-6d  %-14.3f  %-12.1f  %-18.2f\n', k, sv(k), 10*log10(snr_sv(k)), cap_sv(k));
+    end
+    fprintf('\n  --- Capacity Comparison (bits/s/Hz per channel use) ---\n');
+    fprintf('  %-35s  %-4s  %s\n', 'Approach', 'RI', 'Capacity');
+    fprintf('  %-35s  %-4d  %.2f\n', 'SVD upper bound',             length(sv), cap_svd_wb);
+    fprintf('  %-35s  %-4d  %.2f\n', 'Mode A (Rel-19 §5.2.2.2.1a)', best_ri,   cap_modeA);
+    fprintf('\n');
 
 else
     % --- Approach A: Per-resource PMI/RI/CQI (32 ports each) ---
