@@ -371,6 +371,10 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
 
     % Validate inputs
     numCSIRSPorts = csirs.NumCSIRSPorts(1);
+    % ThangTQ23_128T128R_Rel19: H is aggregated 128-port — use actual size, not per-resource count
+    if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        numCSIRSPorts = size(H,4);
+    end
     nr5g.internal.validateLayerDependentParams(carrier,reportConfig,numCSIRSPorts,H,nLayers);
 
     % Set the below flags to identify the codebook type
@@ -378,6 +382,9 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
     isType1MultiPanel = strcmpi(reportConfig.CodebookType,'Type1MultiPanel');
     isType2 = strcmpi(reportConfig.CodebookType,'Type2');
     isEnhType2 = strcmpi(reportConfig.CodebookType,'eType2');
+    % ThangTQ23_128T128R_Rel19: Refined Type I Single-Panel (TS 38.214 §5.2.2.2.1a)
+    isType1SinglePanel_r19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19');
+    if isType1SinglePanel_r19; isType1SinglePanel = true; end
 
     % Get the codebook
     [codebook,indexSetSizes] = getCodebook(reportConfig,numCSIRSPorts,nLayers);
@@ -466,7 +473,14 @@ function [codebook,indexSetSizes] = getCodebook(reportConfig,numCSIRSPorts,nLaye
 %   [codebook,indexSetSizes] = getCodebook(reportConfig,numCSIRSPorts,nLayers)
 %   returns the codebook and the corresponding indices set sizes
 
-    if strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
+    if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        % ThangTQ23_128T128R_Rel19: Refined Type I Single-Panel codebook
+        % Supports 48/64/128 ports per TS 38.214 §5.2.2.2.1a
+        codebook = getPMIType1SinglePanelR19Codebook(reportConfig,numCSIRSPorts,nLayers);
+        [~,~,i2Length,i11Length,i12Length,i13Length] = size(codebook);
+        indexSetSizes = [i2Length,i11Length,i12Length,i13Length];
+        return;
+    elseif strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
         if numCSIRSPorts == 1
             % Codebook is a scalar with the value 1, when the number of CSI-RS
             % ports is 1
@@ -1460,6 +1474,8 @@ function [PMINaNSet,nanInfo] = getPMINaNSet(reportConfig,subbandInfo,codebook,in
     isType1MultiPanel = strcmpi(reportConfig.CodebookType,'Type1MultiPanel');
     isType2 = strcmpi(reportConfig.CodebookType,'Type2');
     isEnhType2 = strcmpi(reportConfig.CodebookType,'eType2');
+    % ThangTQ23_128T128R_Rel19
+    if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19'); isType1SinglePanel = true; end
     csirsIndLen = length(csirsIndBWP_k);
     nanInfo.CSIRSIndices = NaN(csirsIndLen,3);
 
@@ -1517,7 +1533,9 @@ function [PMISet,W,SINRPerREPMI,SubbandSINRs] = getTypeIPMIWideband(reportConfig
     totalSINR = round(reshape(totalSINR,indexSetSizes),4,'decimals');
     % Find the set of indices that correspond to the precoding
     % matrix with maximum SINR
-    if strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
+    if strcmpi(reportConfig.CodebookType,'Type1SinglePanel') || ...
+            strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        % ThangTQ23_128T128R_Rel19: r19 shares same [i2,i11,i12,i13] index structure
         [i2,i11,i12,i13] = ind2sub(size(totalSINR),find(totalSINR == max(totalSINR,[],'all'),1));
         PMISet.i1 = [i11 i12 i13];
         PMISet.i2 = i2;
@@ -2180,6 +2198,166 @@ function [W2_quantized,k1,k2,c,istar,fstar] = quantizeW2ForEnhancedType2(W2,beta
     p20 = p2(1:numBeams,:,:);
     p21 = p2(numBeams+(1:numBeams),:,:);
     W2_quantized = [p10.*p20; p11.*p21].*exp(1i*phase);
+end
+
+% =========================================================================
+% ThangTQ23_128T128R_Rel19
+% Refined Type I Single-Panel Codebook  (TS 38.214 §5.2.2.2.1a, Rel-19)
+% Supports 48 / 64 / 128 antenna ports — modeA only (modeB: TODO)
+% =========================================================================
+function codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,nLayers)
+%   codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,nLayers)
+%   Returns type I single-panel codebook for 48/64/128 ports as defined
+%   in TS 38.214 Table 5.2.2.2.1a-4 (modeA).
+%
+%   Codebook size: Pcsirs x nLayers x i2Len x i11Len x i12Len x i13Len
+%   where i13Len=1 for rank 1 (dummy dim to keep uniform indexing).
+
+    % codebookMode: 1=modeA (implemented), 2=modeB (TODO)
+    % Suppress unused-variable warning: modeB not yet implemented
+    % codebookMode = reportConfig.CodebookMode;
+    codebookSubsetRestriction = reportConfig.CodebookSubsetRestriction;
+    i2Restriction             = reportConfig.I2Restriction;
+
+    % Panel dimensions from reportConfig [Ng N1 N2]
+    panelDimensions = reportConfig.PanelDimensions;
+    N1 = panelDimensions(2);
+    N2 = panelDimensions(3);
+
+    % Look up (O1,O2) from the extended table
+    panelConfigs = reportConfig.Tables.SinglePanelConfigurations;
+    configIdx    = panelConfigs{:,2} == [N1 N2];
+    OverSamplingFactors = panelConfigs{all(configIdx,2),3};
+    O1 = OverSamplingFactors(1);
+    O2 = OverSamplingFactors(2);
+
+    % Co-phasing: phi(n) = exp(j*pi*n/2)
+    phi = @(x) exp(1i*pi*x/2);
+
+    % -----------------------------------------------------------------------
+    % Table 5.2.2.2.1a-3: i1,3 → (k1,k2) offsets for modeA, rank 2-8
+    % For 128 ports (N1>=N2 generally):
+    %   i1,3 encodes the second-beam offset as a 2D grid index:
+    %     row  = floor(i1,3 / (N2*O2))   horizontal offset units
+    %     col  = mod(  i1,3,   N2*O2)    vertical offset units
+    %   k1 = row * O1,  k2 = col (raw vertical index, 0-based within N2*O2)
+    %   Number of valid i1,3 values = N1*O1 * N2*O2 - 1  (exclude (0,0))
+    %   In practice constrained to orthogonal pairs per spec; here we use
+    %   the full set [excludes (0,0)] truncated to i13_maxLen.
+    % For rank 2-4 the spec defines 3 or 4 specific pairs (Table 5.2.2.2.1a-3).
+    % Minimal Rel-19 set used here (aligned with Table 5.2.2.2.1a-3):
+    % -----------------------------------------------------------------------
+    function [k1_vec, k2_vec, i13_len] = getBeamPairOffsets(N1,N2,O1,O2,nLayers)
+        if N2 == 1
+            % N2=1: only horizontal offsets
+            if N1*O1 >= 4
+                k1_vec = O1*[1 2 3];  k2_vec = [0 0 0];  i13_len = 3;
+            else
+                k1_vec = O1*1;        k2_vec = 0;         i13_len = 1;
+            end
+        else
+            % N2>1: mixed horizontal/vertical offsets (Table 5.2.2.2.1a-3)
+            k1_vec = [O1  0   O1  0  ];
+            k2_vec = [0   O2  O2  2*O2];
+            i13_len = 4;
+        end
+        if nLayers == 1; i13_len = 1; k1_vec = 0; k2_vec = 0; end
+    end
+
+    [k1_vec, k2_vec, i13_len] = getBeamPairOffsets(N1,N2,O1,O2,nLayers);
+
+    switch nLayers
+        case 1  % TS 38.214 Table 5.2.2.2.1a-4, rank=1
+            i11_len = N1*O1;
+            i12_len = N2*O2;
+            i2_len  = 4;           % co-phase n ∈ {0,1,2,3}
+            codebook = zeros(Pcsirs,1,i2_len,i11_len,i12_len,1);
+            for i11 = 0:i11_len-1
+                for i12 = 0:i12_len-1
+                    vlm = getVlm(N1,N2,O1,O2,i11,i12);
+                    bitIdx = N2*O2*i11 + i12;
+                    for i2 = 0:i2_len-1
+                        [lmR,i2R] = isRestricted(codebookSubsetRestriction,bitIdx,i2,i2Restriction);
+                        if ~(lmR||i2R)
+                            codebook(:,:,i2+1,i11+1,i12+1,1) = ...
+                                (1/sqrt(Pcsirs)) * [vlm; phi(i2)*vlm];
+                        end
+                    end
+                end
+            end
+
+        case 2  % TS 38.214 Table 5.2.2.2.1a-4, rank=2
+            i11_len = N1*O1;
+            i12_len = N2*O2;
+            i2_len  = 2;           % co-phase n ∈ {0,1}
+            codebook = zeros(Pcsirs,2,i2_len,i11_len,i12_len,i13_len);
+            for i11 = 0:i11_len-1
+                for i12 = 0:i12_len-1
+                    vlm = getVlm(N1,N2,O1,O2,i11,i12);
+                    bitIdx = N2*O2*i11 + i12;
+                    for i13 = 0:i13_len-1
+                        lp = mod(i11 + k1_vec(i13+1), N1*O1);
+                        mp = mod(i12 + k2_vec(i13+1), N2*O2);
+                        vlp_mp = getVlm(N1,N2,O1,O2,lp,mp);
+                        for i2 = 0:i2_len-1
+                            [lmR,i2R] = isRestricted(codebookSubsetRestriction,bitIdx,i2,i2Restriction);
+                            if ~(lmR||i2R)
+                                pn = phi(i2);
+                                codebook(:,:,i2+1,i11+1,i12+1,i13+1) = ...
+                                    (1/sqrt(2*Pcsirs)) * ...
+                                    [vlm        vlp_mp;
+                                     pn*vlm  -pn*vlp_mp];
+                            end
+                        end
+                    end
+                end
+            end
+
+        case {3,4}  % TS 38.214 Table 5.2.2.2.1a-4, rank=3,4
+            % Three/four-beam structure: beams at (l,m), (l+k1,m+k2), (l+2k1,m+2k2) ...
+            i11_len = N1*O1;
+            i12_len = N2*O2;
+            i2_len  = 2;
+            codebook = zeros(Pcsirs,nLayers,i2_len,i11_len,i12_len,i13_len);
+            for i11 = 0:i11_len-1
+                for i12 = 0:i12_len-1
+                    vlm = getVlm(N1,N2,O1,O2,i11,i12);
+                    bitIdx = N2*O2*i11 + i12;
+                    for i13 = 0:i13_len-1
+                        lp  = mod(i11 + k1_vec(i13+1),   N1*O1);
+                        mp  = mod(i12 + k2_vec(i13+1),   N2*O2);
+                        lpp = mod(i11 + 2*k1_vec(i13+1), N1*O1);
+                        mpp = mod(i12 + 2*k2_vec(i13+1), N2*O2);
+                        v1 = getVlm(N1,N2,O1,O2,lp, mp);
+                        v2 = getVlm(N1,N2,O1,O2,lpp,mpp);
+                        for i2 = 0:i2_len-1
+                            [lmR,i2R] = isRestricted(codebookSubsetRestriction,bitIdx,i2,i2Restriction);
+                            if ~(lmR||i2R)
+                                pn = phi(i2);
+                                if nLayers == 3
+                                    codebook(:,:,i2+1,i11+1,i12+1,i13+1) = ...
+                                        (1/sqrt(3*Pcsirs)) * ...
+                                        [vlm   v1    v2;
+                                         pn*vlm pn*v1 -pn*v2];
+                                else % nLayers==4
+                                    lp3 = mod(i11 + 3*k1_vec(i13+1), N1*O1);
+                                    mp3 = mod(i12 + 3*k2_vec(i13+1), N2*O2);
+                                    v3 = getVlm(N1,N2,O1,O2,lp3,mp3);
+                                    codebook(:,:,i2+1,i11+1,i12+1,i13+1) = ...
+                                        (1/sqrt(4*Pcsirs)) * ...
+                                        [vlm    v1    v2    v3;
+                                         pn*vlm pn*v1 pn*v2 pn*v3];
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+        otherwise  % rank 5-8: approximate via SVD-split (TODO: full spec impl)
+            warning('typeI-SinglePanel-r19: ranks 5-8 not yet implemented. Falling back to rank-4 codebook.');
+            codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,4);
+    end
 end
 
 function vlm = getVlm(N1,N2,O1,O2,l,m)
