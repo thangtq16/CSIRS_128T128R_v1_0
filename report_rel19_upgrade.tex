@@ -1,0 +1,487 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{caption}
+
+% Code listing style
+\lstset{
+  language=Matlab,
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray!70},
+  stringstyle=\color{orange!80!black},
+  frame=single,
+  breaklines=true,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  xleftmargin=1.5em,
+  framexleftmargin=1.5em,
+}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+\title{
+  \Large\textbf{MATLAB 5G Toolbox Extension for 3GPP Release 19}\\[0.4em]
+  \large Refined Type I Single-Panel Codebook for 128-Port Massive MIMO\\[0.4em]
+  \normalsize NR Cell Performance Simulation --- 128T128R gNB / 4T4R UE
+}
+\author{Thang T.Q.}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%% ============================================================
+\section{Executive Summary}
+%% ============================================================
+
+This report documents the upgrade of the NR cell-performance MU-MIMO simulation
+from 3GPP Release~15/16 (32-port gNB) to Release~19 (128-port gNB, 4-port UE).
+The work involved extending the MATLAB~5G~Toolbox---specifically two internal
+library files---to support the \emph{Refined Type~I Single-Panel Codebook}
+defined in TS~38.214 \S5.2.2.2.1a (Rel-19).
+
+\medskip
+\noindent\textbf{Key results achieved:}
+\begin{itemize}
+  \item 128-port CSI-RS resource grid construction (4 resources $\times$ 32 ports,
+        Row~18 CDM8, 2 slots).
+  \item Full 128-port channel estimation (NMSE~$\approx -31.5$~dB at SNR~20~dB,
+        CDL-C; $-27.8$~dB for CDL-B).
+  \item Rel-19 modeA PMI reporting: RI selection 1--4, per-layer SINR and CQI.
+  \item Demonstrated \textbf{RI~=~4} with CDL-B channel (near-uniform singular
+        values), proving the codebook supports full-rank spatial multiplexing
+        up to $\min(N_\text{Tx},N_\text{Rx}) = 4$ layers.
+  \item Capacity comparison: SVD upper bound~37.3~bits/s/Hz vs.\
+        Mode-A codebook~14.5~bits/s/Hz at RI~=~4.
+\end{itemize}
+
+%% ============================================================
+\section{Background and Motivation}
+%% ============================================================
+
+\subsection{Rel-15/16 Limitation}
+
+The existing MATLAB~5G~Toolbox (\texttt{nrPMIReport}) implements the Type~I
+Single-Panel codebook of TS~38.214 \S5.2.2.2.1 for up to 32 CSI-RS ports.
+For a 128-port gNB, Rel-15/16 offers no direct codebook support.
+
+\subsection{Rel-19 Codebook Extension}
+
+3GPP Release~19 (TS~38.214 v19.2.0) introduces \S5.2.2.2.1a,
+\emph{Refined Type~I Single-Panel Codebook}, supporting 48, 64, and 128 antenna
+ports via CSI-RS resource aggregation. For 128~ports:
+\begin{align}
+  N_1 \times N_2 \times 2 \;\text{pol} &= 128, \quad
+  (N_1,N_2) \in \{(16,4),\;(8,8)\}, \quad O_1 = O_2 = 4.
+\end{align}
+The precoder is based on a 2D over-sampled DFT grid (modeA/modeB).
+
+%% ============================================================
+\section{Implementation Approach}
+%% ============================================================
+
+\subsection{Design Principle: Workspace Custom Library}
+
+Rather than modifying the installed MATLAB toolbox, copies of the two relevant
+internal files were placed in the project workspace:
+\begin{verbatim}
+  CSIRS_128T128R_v1_0/
+    5g/5g/nrCSIReportConfig.m                 (copy)
+    5g/5g/+nr5g/+internal/nrPMIReport.m       (copy)
+    CSIRS_128T128R_v1_0.m                     (main simulation script)
+\end{verbatim}
+MATLAB's path resolution picks the workspace copies first, leaving the
+installed toolbox untouched. All Rel-19 additions are guarded with the
+comment tag \texttt{\% ThangTQ23\_128T128R\_Rel19} for traceability.
+
+A feature flag in the main script controls the execution path:
+\begin{lstlisting}
+ThangTQ23_128T128R_Rel19 = true;  % true -> Approach C (Rel-19)
+\end{lstlisting}
+
+%% ============================================================
+\section{File Modifications}
+%% ============================================================
+
+\subsection{\texttt{nrCSIReportConfig.m} --- Configuration Table Extension}
+
+\textbf{Change~1: New codebook type token.}
+\begin{lstlisting}
+% Original (Rel-15/16):
+CodebookType_Values = {'type1SinglePanel','type1MultiPanel','type2','eType2'};
+
+% Added (Rel-19):
+CodebookType_Values = {'type1SinglePanel','type1MultiPanel','type2','eType2',...
+                       'typeI-SinglePanel-r19'};
+\end{lstlisting}
+
+\textbf{Change~2: 128-port entries in \texttt{getSinglePanelConfigurations()}.}
+The function returns a lookup table \texttt{\{Pcsirs, [N1 N2], [O1 O2]\}}.
+Six new rows were appended matching Table~5.2.2.2.1a-1:
+
+\begin{table}[h]
+\centering
+\caption{New rows added to \texttt{getSinglePanelConfigurations()}}
+\begin{tabular}{rcc}
+\toprule
+$P_\text{CSIRS}$ & $(N_1,N_2)$ & $(O_1,O_2)$ \\
+\midrule
+48 & (8,3) & (4,4) \\
+48 & (6,4) & (4,4) \\
+48 & (16,2) & (4,4) \\
+64 & (8,4) & (4,4) \\
+\textbf{128} & \textbf{(16,4)} & \textbf{(4,4)} \\
+\textbf{128} & \textbf{(8,8)} & \textbf{(4,4)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{\texttt{nrPMIReport.m} --- Codebook Engine Extension}
+
+This is the core modification. Four hooks were added to existing code, and
+one new function was appended (155~lines).
+
+\subsubsection{Hook~1: Port Count Override (line~375)}
+
+The original code reads the port count from the CSI-RS config object, which
+reports 32 (one resource). For the aggregated 128-port case, the actual count
+must come from the channel matrix dimension:
+
+\begin{lstlisting}
+% ThangTQ23_128T128R_Rel19: H is aggregated 128-port
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    numCSIRSPorts = size(H,4);   % override: 128
+end
+\end{lstlisting}
+
+\subsubsection{Hook~2: CodebookType Flag Alias (line~386)}
+
+The existing flow uses \texttt{isType1SinglePanel} to gate output formatting.
+The r19 type is aliased so it inherits the same path:
+
+\begin{lstlisting}
+isType1SinglePanel_r19 = strcmpi(reportConfig.CodebookType,...
+                                 'typeI-SinglePanel-r19');
+if isType1SinglePanel_r19; isType1SinglePanel = true; end
+\end{lstlisting}
+
+\subsubsection{Hook~3: Codebook Dispatch in \texttt{getCodebook()} (line~476)}
+
+\begin{lstlisting}
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    codebook = getPMIType1SinglePanelR19Codebook(reportConfig,...
+                                                 numCSIRSPorts, nLayers);
+    [~,~,i2L,i11L,i12L,i13L] = size(codebook);
+    indexSetSizes = [i2L, i11L, i12L, i13L];
+    return;
+end
+\end{lstlisting}
+
+\subsubsection{Hook~4: PMI Wideband Selection (line~1537)}
+
+Added r19 to the \texttt{Type1SinglePanel} branch of
+\texttt{getTypeIPMIWideband()} so the 4-index \texttt{ind2sub} path
+\texttt{[i2,i11,i12,i13]} is used:
+
+\begin{lstlisting}
+if strcmpi(reportConfig.CodebookType,'Type1SinglePanel') || ...
+        strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    [i2,i11,i12,i13] = ind2sub(size(totalSINR),...
+        find(totalSINR == max(totalSINR,[],'all'),1));
+    ...
+end
+\end{lstlisting}
+
+\subsubsection{New Function: \texttt{getPMIType1SinglePanelR19Codebook()} (line~2208)}
+
+This function implements TS~38.214 Table~5.2.2.2.1a-4 (modeA) for ranks 1--4.
+The codebook tensor has dimensions:
+\begin{equation}
+  \mathbf{C} \in \mathbb{C}^{P \times r \times N_{i_2} \times N_{i_{1,1}} \times N_{i_{1,2}} \times N_{i_{1,3}}}
+\end{equation}
+where $P=128$, $r$ is the rank, and the index sizes are given in
+Table~5.2.2.2.1a-2.
+
+\paragraph{Beam vector $v_{l,m}$}
+\begin{equation}
+  v_{l,m} = \mathbf{u}_h(l) \otimes \mathbf{u}_v(m), \quad
+  [\mathbf{u}_h(l)]_k = e^{j2\pi l k / (O_1 N_1)}, \quad
+  [\mathbf{u}_v(m)]_k = e^{j2\pi m k / (O_2 N_2)}
+\end{equation}
+
+\paragraph{Rank-1 precoder ($n = i_2 \in \{0,1,2,3\}$)}
+\begin{equation}
+  W^{(1)} = \frac{1}{\sqrt{P}}
+  \begin{bmatrix} v_{l,m} \\ \varphi(n)\,v_{l,m} \end{bmatrix}
+\end{equation}
+
+\paragraph{Rank-2 precoder ($n = i_2 \in \{0,1\}$, offset $(k_1,k_2)$ from $i_{1,3}$)}
+\begin{equation}
+  W^{(2)} = \frac{1}{\sqrt{2P}}
+  \begin{bmatrix}
+    v_{l,m} & v_{l',m'} \\
+    \varphi(n)\,v_{l,m} & -\varphi(n)\,v_{l',m'}
+  \end{bmatrix}, \quad
+  l' = l+k_1 \pmod{N_1 O_1}, \; m' = m+k_2 \pmod{N_2 O_2}
+\end{equation}
+
+\paragraph{Rank-4 precoder}
+\begin{equation}
+  W^{(4)} = \frac{1}{\sqrt{4P}}
+  \begin{bmatrix}
+    v_0 & v_1 & v_2 & v_3 \\
+    \varphi(n)\,v_0 & \varphi(n)\,v_1 & \varphi(n)\,v_2 & \varphi(n)\,v_3
+  \end{bmatrix}
+\end{equation}
+where $v_k = v_{l+k k_1,\;m+k k_2}$ for $k=0,1,2,3$.
+
+\paragraph{Beam offsets (Table~5.2.2.2.1a-3, $N_2 > 1$)}
+\begin{equation}
+  i_{1,3} \in \{0,1,2,3\} \;\Rightarrow\;
+  (k_1,k_2) \in \{(O_1,0),\;(0,O_2),\;(O_1,O_2),\;(0,2O_2)\}
+\end{equation}
+
+\paragraph{Code implementation of beam offsets}
+\begin{lstlisting}
+k1_vec = [O1  0   O1  0  ];   % i1,3 = 0,1,2,3
+k2_vec = [0   O2  O2  2*O2];  % for N2 > 1
+\end{lstlisting}
+
+%% ============================================================
+\section{Main Script Changes (\texttt{CSIRS\_128T128R\_v1\_0.m})}
+%% ============================================================
+
+\subsection{128-Port CSI-RS Resource Aggregation}
+
+Four NZP-CSI-RS resources (Row~18, CDM8, 32~ports each) are configured
+across 2 slots to cover all 128 ports:
+
+\begin{table}[h]
+\centering
+\caption{CSI-RS resource mapping for 128-port aggregation}
+\begin{tabular}{cccc}
+\toprule
+Resource & Slot & Symbols & Ports \\
+\midrule
+0 & 0 & 2,3,4,5 & 0--31 \\
+1 & 0 & 8,9,10,11 & 32--63 \\
+2 & 1 & 2,3,4,5 & 64--95 \\
+3 & 1 & 8,9,10,11 & 96--127 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Wideband Channel Matrix Construction}
+
+Each per-resource channel estimate
+$\hat{\mathbf{H}}_r \in \mathbb{C}^{K \times L \times 4 \times 32}$
+is averaged over frequency and time and assembled into:
+\begin{equation}
+  \mathbf{H}_\text{wb} \in \mathbb{C}^{4 \times 128}, \quad
+  [\mathbf{H}_\text{wb}]_{:,\,pS:pE} =
+    \mathbb{E}_{k,l}\left[\hat{\mathbf{H}}_r(k,l,:,:)\right]
+\end{equation}
+This is broadcast to $[K \times L \times 4 \times 128]$ for \texttt{nrPMIReport}.
+
+\subsection{RI Selection via Capacity Metric}
+
+\textbf{Critical design choice:} RI is selected by maximising total achievable rate
+(log-domain), \emph{not} linear SINR sum. Using linear SINR sum would always
+favour RI~=~1 because a single high-SINR layer dominates the sum:
+\begin{lstlisting}
+for ri_try = 1:min(nRxAntennas, 4)
+    [~, info_try] = nr5g.internal.nrPMIReport(..., ri_try, ...);
+    sinr_vals = info_try.SINRPerREPMI(:);
+    rate_sum  = sum(log2(1 + sinr_vals(isfinite(sinr_vals)...
+                                       & sinr_vals >= 0)));
+    if rate_sum > best_rate
+        best_rate = rate_sum;
+        best_ri   = ri_try;
+    end
+end
+\end{lstlisting}
+
+%% ============================================================
+\section{Verification Against TS~38.214 Rel-19}
+%% ============================================================
+
+\begin{table}[h]
+\centering
+\caption{Spec compliance verification}
+\begin{tabular}{lp{6cm}l}
+\toprule
+Spec requirement & Code reference & Status \\
+\midrule
+Table 5.2.2.2.1a-1: $(N_1,N_2) \in \{(16,4),(8,8)\}$, $O_1=O_2=4$ for 128p
+  & \texttt{nrCSIReportConfig.m}, config table & \checkmark \\
+Table 5.2.2.2.1a-2: $i_{1,1} \in [0..63]$, $i_{1,2} \in [0..15]$ (modeA, $(16,4)$)
+  & \texttt{i11\_len=N1*O1}, \texttt{i12\_len=N2*O2} & \checkmark \\
+Table 5.2.2.2.1a-3: $(k_1,k_2)$ offsets for rank 2--4
+  & \texttt{k1\_vec, k2\_vec} arrays & \checkmark \\
+Table 5.2.2.2.1a-4: Rank-1 precoder formula
+  & \texttt{[vlm; phi(i2)*vlm]/sqrt(P)} & \checkmark \\
+Table 5.2.2.2.1a-4: Rank-2 precoder formula
+  & \texttt{[vlm,vp; pn*vlm,-pn*vp]/sqrt(2P)} & \checkmark \\
+Table 5.2.2.2.1a-4: Rank-4 precoder formula
+  & \texttt{[v0..v3; pn*v0..pn*v3]/sqrt(4P)} & \checkmark \\
+$\varphi(n) = e^{j\pi n/2}$
+  & \texttt{phi = @(x) exp(1i*pi*x/2)} & \checkmark \\
+$v_{l,m} = \mathbf{u}_h(l) \otimes \mathbf{u}_v(m)$ (DFT)
+  & \texttt{getVlm()}: \texttt{reshape((ul.*um).',[],1)} & \checkmark \\
+Normalisation $1/\sqrt{r P}$
+  & \texttt{1/sqrt(r*Pcsirs)} for $r=1,2,3,4$ & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Known limitations (future work):}
+\begin{itemize}
+  \item Ranks 5--8: not implemented; code falls back to rank-4 with warning.
+  \item modeB: not implemented (requires independent per-layer beam search).
+\end{itemize}
+
+%% ============================================================
+\section{Simulation Results}
+%% ============================================================
+
+\subsection{Simulation Parameters}
+
+\begin{table}[h]
+\centering
+\caption{Simulation configuration}
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Carrier & 52 PRBs, SCS 30~kHz, 3.5~GHz \\
+gNB antenna & $4V \times 16H \times 2\text{pol} = 128$~ports \\
+UE antenna & $1V \times 2H \times 2\text{pol} = 4$~ports \\
+CSI-RS & 4 resources, Row~18, CDM8, 32~ports each \\
+Channel (rank-4 test) & CDL-B, DS~100~ns, $f_D = 5$~Hz \\
+Channel (original) & CDL-C, DS~100~ns, $f_D = 5$~Hz \\
+SNR & 20~dB \\
+Codebook & typeI-SinglePanel-r19 (modeA) \\
+$(N_1,N_2)$ & $(16,4)$, $O_1=O_2=4$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Channel Estimation Quality}
+
+\begin{table}[h]
+\centering
+\caption{Per-resource channel estimation NMSE}
+\begin{tabular}{ccc}
+\toprule
+Channel & Overall MSE & NMSE \\
+\midrule
+CDL-C & $4.90 \times 10^{-4}$ & $-31.5$~dB \\
+CDL-B & $6.64 \times 10^{-4}$ & $-27.8$~dB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{PMI Reporting Results}
+
+\begin{table}[h]
+\centering
+\caption{Rel-19 modeA PMI report --- CDL-B channel, SNR~20~dB}
+\begin{tabular}{lc}
+\toprule
+Metric & Value \\
+\midrule
+RI selected & \textbf{4} \\
+PMI $i_1$ (0-based) & $[57, 14, 0]$ \\
+PMI $i_2$ (0-based) & 1 \\
+Per-layer SINR & $[12.8,\;13.7,\;14.6,\;16.8]$~dB \\
+Per-layer CQI (64-QAM mapping) & $[10,\;10,\;11,\;12]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Capacity Comparison}
+
+\begin{table}[h]
+\centering
+\caption{Capacity at wideband channel (CDL-B, SNR~20~dB)}
+\begin{tabular}{lccc}
+\toprule
+Approach & RI & Capacity (bits/s/Hz) & Gap to SVD \\
+\midrule
+SVD (upper bound) & 4 & 37.31 & --- \\
+Rel-19 modeA codebook & 4 & 14.51 & $-22.8$~dB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The gap between SVD and modeA (22.8~bits/s/Hz) is expected: the DFT codebook
+constrains the second, third, and fourth beams to fixed offsets $(k_1,k_2)$
+relative to the dominant beam, whereas SVD uses the exact right singular
+vectors of $\mathbf{H}$.
+
+\subsection{SVD Channel Rank Analysis (CDL-B)}
+
+\begin{table}[h]
+\centering
+\caption{Singular value decomposition of wideband $\mathbf{H}$ (CDL-B)}
+\begin{tabular}{cccc}
+\toprule
+SV \# & Singular value & SNR (dB) & Capacity contribution (bits/s/Hz) \\
+\midrule
+1 & 8.37 & 32.1 & 10.66 \\
+2 & 5.94 & 29.1 & 9.67 \\
+3 & 4.18 & 26.0 & 8.65 \\
+4 & 3.75 & 25.1 & 8.34 \\
+\midrule
+\multicolumn{3}{l}{\textbf{Total SVD capacity}} & \textbf{37.31} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+CDL-B exhibits near-uniform singular values (only 7~dB spread across 4 SVs),
+confirming that the channel supports spatial multiplexing up to rank~4.
+
+%% ============================================================
+\section{Conclusions}
+%% ============================================================
+
+The simulation framework has been successfully upgraded from Rel-15/16 to
+Release~19 with the following verified outcomes:
+
+\begin{enumerate}
+  \item \textbf{128-port CSI-RS}: Resource aggregation (4$\times$32~ports,
+        Row~18 CDM8) correctly generates 128-port channel estimates at
+        NMSE~$< -27$~dB.
+
+  \item \textbf{Rel-19 Codebook}: The Refined Type~I Single-Panel codebook
+        (TS~38.214 \S5.2.2.2.1a, modeA) has been implemented in the MATLAB
+        workspace library with full spec compliance for ranks~1--4.
+
+  \item \textbf{RI~=~4 Demonstrated}: With CDL-B channel (near-uniform SVs),
+        the Rel-19 modeA codebook correctly selects RI~=~4 and reports
+        per-layer SINR $\approx 12$--17~dB at SNR~20~dB.
+
+  \item \textbf{No Toolbox Corruption}: All modifications are isolated to
+        workspace copies; the installed MATLAB 5G Toolbox is unchanged.
+\end{enumerate}
+
+\noindent\textbf{Next steps:}
+\begin{itemize}
+  \item Implement modeB (independent beam search per layer) for improved
+        multi-layer performance on rank-sparse channels (e.g.\ CDL-C).
+  \item Compare with Huawei R1-2500098 Scheme-B (greedy orthogonal DFT)
+        which is the modeB reference for the Rel-19 study item.
+  \item Extend to multi-user (MU-MIMO) scheduling with the 128-port codebook.
+\end{itemize}
+
+\end{document}

@@ -241,11 +241,14 @@ gnbArraySize = [4, 16, 2, 1, 1];  % [Nv, Nh, Npol, Mg, Ng]
 % 4 antennas: 1V x 2H x 2pol = 4
 ueArraySize = [1, 2, 2, 1, 1];
 
-% --- CDL-C Channel (ONE object, used for the full 2-slot waveform) ---
+% --- CDL Channel (ONE object, used for the full 2-slot waveform) ---
+% CDL-B: near-uniform SV distribution [12,11,10,9] dB → best for modeA RI=4 test
+% CDL-C: urban macro, concentrated → SV1 dominant, modeA gives RI=1 (original)
+% CDL-D/E: LOS dominant → even worse for rank
 channel = nrCDLChannel;
-channel.DelayProfile         = 'CDL-C';
-channel.DelaySpread          = 100e-9;       % 100ns (Urban Macro)
-channel.MaximumDopplerShift  = 5;            % 5 Hz (low mobility, indoor/pedestrian)
+channel.DelayProfile         = 'CDL-B';     % Changed: CDL-C→CDL-B for rank-4 test
+channel.DelaySpread          = 100e-9;       % 100ns
+channel.MaximumDopplerShift  = 5;            % 5 Hz (low mobility)
 channel.CarrierFrequency     = 3.5e9;        % 3.5 GHz (n78)
 
 % Antenna array configuration
@@ -259,7 +262,7 @@ ofdmInfo = nrOFDMInfo(carrier);
 channel.SampleRate = ofdmInfo.SampleRate;
 
 fprintf('\n--- Channel Configuration ---\n');
-fprintf('Channel model: CDL-C\n');
+fprintf('Channel model: %s\n', channel.DelayProfile);
 fprintf('Delay spread: %.0f ns\n', channel.DelaySpread*1e9);
 fprintf('Doppler: %.1f Hz\n', channel.MaximumDopplerShift);
 fprintf('Carrier freq: %.1f GHz\n', channel.CarrierFrequency/1e9);
@@ -461,7 +464,7 @@ if ThangTQ23_128T128R_Rel19
     nSC  = carrier.NSizeGrid * 12;
     nSym = carrier.SymbolsPerSlot;
     % Broadcast wideband H across all K subcarriers and L symbols
-    H_r19 = repmat(reshape(H_wb_r19.', 1, 1, nRxAntennas, nTxAntennas), [nSC nSym 1 1]);
+    H_r19 = repmat(reshape(H_wb_r19,   1, 1, nRxAntennas, nTxAntennas), [nSC nSym 1 1]);
 
     % Configure Rel-19 report config (nrCSIReportConfig object — Ng=1, N1=16, N2=4)
     repCfg_r19               = nrCSIReportConfig;
@@ -520,9 +523,9 @@ if ThangTQ23_128T128R_Rel19
     cap_sv = log2(1 + snr_sv);
     cap_svd_wb = sum(cap_sv);
 
-    % Mode A capacity: use actual precoder W from info_r19
+    % Mode A capacity: H_wb_r19 [nRx×nTx] × W [nTx×ri] → H_eff [nRx×ri]
     W_modeA   = info_r19.W;                           % [128 x best_ri]
-    H_eff_A   = H_wb_r19 * W_modeA;                   % [nRx x best_ri]
+    H_eff_A   = H_wb_r19 * W_modeA;                  % [4 x best_ri]
     snr_A     = 1 / (nVar_r19 * best_ri);
     cap_modeA = real(log2(det(eye(nRxAntennas) + snr_A * (H_eff_A * H_eff_A'))));
 
@@ -747,7 +750,7 @@ fprintf('======================================================\n');
 fprintf(' Carrier:     %3d PRBs, SCS %2d kHz\n', carrier.NSizeGrid, carrier.SubcarrierSpacing);
 fprintf(' Antennas:    %dT x %dR\n', nTxAntennas, nRxAntennas);
 fprintf(' CSI-RS:      %d x Row18 (32p, CDM8), 2 slots\n', nResources);
-fprintf(' Channel:     CDL-C, DS=%.0fns, fD=%.0fHz\n', ...
+fprintf(' Channel:     %s, DS=%.0fns, fD=%.0fHz\n', channel.DelayProfile, ...
     channel.DelaySpread*1e9, channel.MaximumDopplerShift);
 fprintf(' SNR:         %d dB\n', SNRdB);
 fprintf(' CE NMSE:     %.2f dB\n', 10*log10(mean(nmse_per_port)));
