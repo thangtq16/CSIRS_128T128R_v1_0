@@ -43,7 +43,7 @@ rehash toolboxcache;
 
 % --- Carrier ---
 carrier = nrCarrierConfig;
-carrier.NSizeGrid           = 52;          % 10 MHz @ SCS 30 kHz
+carrier.NSizeGrid           = 273;         % 100 MHz @ SCS 30 kHz
 carrier.SubcarrierSpacing   = 30;          % kHz
 carrier.NSlot               = 0;
 carrier.NFrame              = 0;
@@ -250,9 +250,9 @@ ueArraySize = [1, 2, 2, 1, 1];
 % CDL-D/E: LOS dominant → even worse for rank
 channel = nrCDLChannel;
 channel.DelayProfile         = 'CDL-B';     % Changed: CDL-C→CDL-B for rank-4 test
-channel.DelaySpread          = 100e-9;       % 100ns
-channel.MaximumDopplerShift  = 5;            % 5 Hz (low mobility)
-channel.CarrierFrequency     = 3.5e9;        % 3.5 GHz (n78)
+channel.DelaySpread          = 450e-9;       % 450ns (Urban Macro)
+channel.MaximumDopplerShift  = 136;          % 136 Hz (30 km/h @ 4.9 GHz)
+channel.CarrierFrequency     = 4.9e9;        % 4.9 GHz
 
 % Antenna array configuration
 channel.TransmitAntennaArray.Size           = gnbArraySize;
