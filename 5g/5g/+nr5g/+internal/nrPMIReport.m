@@ -385,6 +385,8 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
     % ThangTQ23_128T128R_Rel19: Refined Type I Single-Panel (TS 38.214 §5.2.2.2.1a)
     isType1SinglePanel_r19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19');
     if isType1SinglePanel_r19; isType1SinglePanel = true; end
+    % modeB all ranks: factored search path (no precomputed codebook)
+    isModeB_r19 = isType1SinglePanel_r19 && (reportConfig.CodebookMode == 2);
 
     % Get the codebook
     [codebook,indexSetSizes] = getCodebook(reportConfig,numCSIRSPorts,nLayers);
@@ -427,7 +429,21 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
         nVar = nVarUpdated;
     end
 
-    if isType2 || isEnhType2
+    if isModeB_r19
+        % ThangTQ23_128T128R_Rel19 modeB: factored greedy search, all ranks 1-4
+        nVar_scalar = mean(nVar(:), 'omitnan');
+        [W, pmiModeB, sinrVec] = getPMIType1SinglePanelR19CodebookModeB( ...
+            Hcsirs, reportConfig, nLayers, nVar_scalar, numCSIRSPorts);
+        % PMISet: 1-based, i1 = [q1+1, q2+1, n_idx(1)+1, ..., n_idx(v)+1]
+        PMISet.i1    = [pmiModeB.q1+1, pmiModeB.q2+1, pmiModeB.n_idx+1];
+        PMISet.i2    = pmiModeB.c_idx + 1;
+        SINRPerRE    = [];
+        SINRPerREPMI = sinrVec(:).';   % [1 × nLayers]
+        SubbandSINRs = sinrVec(:).';
+        SINRPerREOut = [];
+        codebookOut  = [];
+
+    elseif isType2 || isEnhType2
         [W,PMISet,SubbandSINRs,wbInfo] = getTypeIIPMIWideband(reportConfig,Hcsirs,nLayers,nVar,PMINaNSet);
         if all(isnan(W))
             PMISet = PMINaNSet;
@@ -442,8 +458,8 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
     end
 
     % Get the number of subbands
-    numSubbands = subbandInfo.NumSubbands;       
-    if numSubbands > 1 || (isType2 && reportConfig.SubbandAmplitude)
+    numSubbands = subbandInfo.NumSubbands;
+    if ~isModeB_r19 && (numSubbands > 1 || (isType2 && reportConfig.SubbandAmplitude))
         if isType2 || isEnhType2
             [PMISet,W,SINRPerREPMI,SubbandSINRs] = getTypeIIPMISubband(reportConfig,H_bwp,nVar,nLayers,csirsIndBWP_k,csirsIndBWP_l,PMISet,wbInfo,subbandInfo,indexSetSizes);
         else
@@ -452,14 +468,15 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
     end
 
     % Form the output
-    if isType1SinglePanel || isType1MultiPanel  % Type I codebooks                      
-        SINRPerREOut = SINRPerRE;         % SINR value per RE for all the layers for all PMI indices
-        codebookOut = codebook;           % PMI codebook containing the precoding matrices corresponding to all PMI indices
-        % SINR value per subband for all the layers for all PMI indices
+    if isModeB_r19
+        % SINRPerREOut and codebookOut already set above
+    elseif isType1SinglePanel || isType1MultiPanel
+        SINRPerREOut = SINRPerRE;
+        codebookOut  = codebook;
         SubbandSINRs = reshape(SubbandSINRs,[subbandInfo.NumSubbands,nLayers,indexSetSizes]);
-    else % Type II codebooks
+    else % Type II
         SINRPerREOut = [];
-        codebookOut = [];
+        codebookOut  = [];
     end
     info.SINRPerRE = SINRPerREOut;
     info.SINRPerREPMI = SINRPerREPMI;   % SINR value per RE for all the layers for the reported PMI
@@ -476,9 +493,17 @@ function [codebook,indexSetSizes] = getCodebook(reportConfig,numCSIRSPorts,nLaye
     if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
         % ThangTQ23_128T128R_Rel19: Refined Type I Single-Panel codebook
         % Supports 48/64/128 ports per TS 38.214 §5.2.2.2.1a
-        codebook = getPMIType1SinglePanelR19Codebook(reportConfig,numCSIRSPorts,nLayers);
-        [~,~,i2Length,i11Length,i12Length,i13Length] = size(codebook);
-        indexSetSizes = [i2Length,i11Length,i12Length,i13Length];
+        if reportConfig.CodebookMode == 1
+            % modeA: full precomputed codebook, existing interface
+            codebook = getPMIType1SinglePanelR19CodebookModeA(reportConfig,numCSIRSPorts,nLayers);
+            [~,~,i2Length,i11Length,i12Length,i13Length] = size(codebook);
+            indexSetSizes = [i2Length,i11Length,i12Length,i13Length];
+        else
+            % modeB all ranks: getPMIType1SinglePanelR19CodebookModeB() runs in main body
+            % Scalar placeholder passes the ~any(codebook(:)) NaN-check
+            codebook      = complex(1);
+            indexSetSizes = [1,1,1,1];
+        end
         return;
     elseif strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
         if numCSIRSPorts == 1
@@ -2203,10 +2228,10 @@ end
 % =========================================================================
 % ThangTQ23_128T128R_Rel19
 % Refined Type I Single-Panel Codebook  (TS 38.214 §5.2.2.2.1a, Rel-19)
-% Supports 48 / 64 / 128 antenna ports — modeA only (modeB: TODO)
+% modeA codebook  |  modeB: see getPMIType1SinglePanelR19CodebookModeB()
 % =========================================================================
-function codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,nLayers)
-%   codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,nLayers)
+function codebook = getPMIType1SinglePanelR19CodebookModeA(reportConfig,Pcsirs,nLayers)
+%   codebook = getPMIType1SinglePanelR19CodebookModeA(reportConfig,Pcsirs,nLayers)
 %   Returns type I single-panel codebook for 48/64/128 ports as defined
 %   in TS 38.214 Table 5.2.2.2.1a-4 (modeA).
 %
@@ -2356,7 +2381,139 @@ function codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,nLayer
 
         otherwise  % rank 5-8: approximate via SVD-split (TODO: full spec impl)
             warning('typeI-SinglePanel-r19: ranks 5-8 not yet implemented. Falling back to rank-4 codebook.');
-            codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,4);
+            codebook = getPMIType1SinglePanelR19CodebookModeA(reportConfig,Pcsirs,4);
+    end
+end
+
+% =========================================================================
+% ThangTQ23_128T128R_Rel19  —  Mode B, all ranks 1-4  (factored greedy search)
+% TS 38.214 §5.2.2.2.1a, Table 5.2.2.2.1a-7
+%
+% Each layer selects its beam independently:
+%   i1,1 = [q1 q2]  shared fractional DFT offset (O1×O2 = 16 combos)
+%   i1,2,l ∈ {0,...,N1N2-1}  per-layer beam index  (greedy from SVD)
+%   c_l  ∈ {0,1,2,3}  per-layer co-phase  (exhaustive 4^v, max 256)
+%
+% Returns: W          [Pcsirs × nLayers] precoding matrix
+%          pmiModeB   struct: .q1 .q2 .n_idx [1×v] .c_idx [1×v]  (0-based)
+%          sinrOut    [nLayers × 1] ZF SINR per layer (linear)
+% =========================================================================
+function [W, pmiModeB, sinrOut] = getPMIType1SinglePanelR19CodebookModeB(Hcsirs, reportConfig, nLayers, nVar, Pcsirs)
+% Hcsirs: [nRx × Pcsirs × nRE] (permuted in caller, averaged here to wideband)
+
+    panelDimensions = reportConfig.PanelDimensions;
+    N1 = panelDimensions(2);  N2 = panelDimensions(3);
+    panelConfigs = reportConfig.Tables.SinglePanelConfigurations;
+    configIdx    = panelConfigs{:,2} == [N1 N2];
+    OverSamplingFactors = panelConfigs{all(configIdx,2),3};
+    O1 = OverSamplingFactors(1);  O2 = OverSamplingFactors(2);
+
+    phi   = @(x) exp(1i*pi*x/2);
+    q_len = O1*O2;
+    n_len = N1*N2;
+
+    % Wideband channel: average over RE dimension → [nRx × Pcsirs]
+    H_wb = mean(Hcsirs, 3);   % [nRx × Pcsirs]
+
+    % SVD → leading nLayers right singular vectors as target beams
+    [~, ~, V] = svd(H_wb, 'econ');
+    V_svd = V(:, 1:nLayers);   % [Pcsirs × nLayers]
+    % Both halves: vlm part (upper) + co-phased copy (lower)
+    V_top = V_svd(1:n_len, :);        % [N1N2 × nLayers]
+    V_bot = V_svd(n_len+1:end, :);    % [N1N2 × nLayers]
+
+    best_cap  = -Inf;
+    best_W    = zeros(Pcsirs, nLayers);
+    best_pmi  = struct('q1',0,'q2',0,'n_idx',zeros(1,nLayers),'c_idx',zeros(1,nLayers));
+
+    % --- Stage 1+2: enumerate (q1,q2), greedy per-layer beam selection ---
+    for q_idx = 0:q_len-1
+        q1 = floor(q_idx / O2);
+        q2 = mod(q_idx, O2);
+
+        % Build DFT matrix V_q: [N1N2 × N1N2], column n = vlm for beam n
+        V_q = zeros(n_len, n_len);
+        for n_idx = 0:n_len-1
+            n_val = N1*N2 - 1 - n_idx;
+            n1    = mod(n_val, N1);
+            n2    = (n_val - n1) / N1;
+            m1    = O1*n1 + q1;
+            m2    = O2*n2 + q2;
+            V_q(:, n_idx+1) = getVlm(N1, N2, O1, O2, m1, m2);
+        end
+
+        % Beam candidates per layer:
+        % rank 1 → exhaustive over all N1*N2 beams (same search space as Mode A)
+        % rank > 1 → greedy top-1 per layer using both-polarisation SVD scores
+        if nLayers == 1
+            % [n_len × 1]: each row is a 1-beam candidate (0-based index)
+            n_cand_matrix = (0:n_len-1)';
+        else
+            scores = abs(V_q' * V_top).^2 + abs(V_q' * V_bot).^2; % [n_len × nLayers]
+            n_cand = zeros(1, nLayers);
+            for l = 1:nLayers
+                [~, n_cand(l)] = max(scores(:, l));
+                n_cand(l) = n_cand(l) - 1;   % 0-based
+            end
+            n_cand_matrix = n_cand;  % [1 × nLayers]: single combination to try
+        end
+
+        % Co-phase combinations: 4^nLayers entries
+        c_combos = dec2base(0:4^nLayers-1, 4, nLayers) - '0';  % [4^v × v]
+
+        for n_row = 1:size(n_cand_matrix, 1)
+            if nLayers == 1
+                n_try = n_cand_matrix(n_row);   % scalar, 0-based
+            else
+                n_try = n_cand_matrix(n_row, :); % [1 × nLayers], 0-based
+            end
+
+            for ci = 1:size(c_combos, 1)
+                c_vec = c_combos(ci, :);  % [1 × nLayers]
+
+                % Assemble W per Table 5.2.2.2.1a-7
+                W_top_c = zeros(n_len, nLayers);
+                W_bot_c = zeros(n_len, nLayers);
+                for l = 1:nLayers
+                    nb    = n_try(min(l, numel(n_try)));
+                    n_val = N1*N2 - 1 - nb;
+                    n1    = mod(n_val, N1);
+                    n2    = (n_val - n1) / N1;
+                    m1    = O1*n1 + q1;
+                    m2    = O2*n2 + q2;
+                    v_l   = getVlm(N1, N2, O1, O2, m1, m2);
+                    W_top_c(:, l) = v_l;
+                    W_bot_c(:, l) = phi(c_vec(l)) * v_l;
+                end
+                W_cand = (1/sqrt(nLayers * Pcsirs)) * [W_top_c; W_bot_c];
+
+                % Capacity: log2 det(I + (1/nVar) * H * W * W' * H')
+                H_eff = H_wb * W_cand;   % [nRx × nLayers]
+                cap   = real(log2(det(eye(size(H_eff,1)) + (1/nVar) * (H_eff * H_eff'))));
+
+                if cap > best_cap
+                    best_cap  = cap;
+                    best_W    = W_cand;
+                    best_pmi.q1    = q1;
+                    best_pmi.q2    = q2;
+                    best_pmi.n_idx = n_try(:)';  % row vector, 0-based
+                    best_pmi.c_idx = c_vec;
+                end
+            end
+        end
+    end
+
+    W       = best_W;
+    pmiModeB = best_pmi;
+
+    % Per-layer SINR (ZF)
+    H_eff = H_wb * W;
+    W_zf  = pinv(H_eff);
+    sinrOut = zeros(nLayers, 1);
+    for l = 1:nLayers
+        sig  = abs(W_zf(l,:) * H_eff(:,l))^2;
+        intf = sum(abs(W_zf(l,:) * H_eff).^2) - sig;
+        sinrOut(l) = sig / (intf + nVar * norm(W_zf(l,:))^2);
     end
 end
 

@@ -472,73 +472,87 @@ if ThangTQ23_128T128R_Rel19
     repCfg_r19.NStartBWP     = 0;
     repCfg_r19.CodebookType  = 'typeI-SinglePanel-r19';
     repCfg_r19.PanelDimensions = [1, 16, 4];   % Ng=1, N1=16, N2=4 → 128 ports
-    repCfg_r19.CodebookMode  = 1;              % modeA
     repCfg_r19.PMIFormatIndicator = 'wideband';
 
     nVar_r19 = mean(nVar_all);
+    cqi_tbl  = [-6.7,-4.7,-2.3,0.2,2.4,4.7,6.9,9.3,10.7,12.2,14.1,15.6,18.0,20.3,22.7];
+    ri_max   = min(nRxAntennas, 4);
 
-    % RI selection (try layers 1..4, pick best by total achievable rate)
-    % NOTE: must use log2(1+SINR) sum, NOT linear SINR sum.
-    % Linear SINR sum heavily biases toward RI=1 because rank-1 concentrates
-    % all power into one very high SINR value that dwarfs multi-layer sums.
-    best_ri = 1;  best_rate = -Inf;  best_rate_final = 0;
-    for ri_try = 1:min(nRxAntennas, 4)
+    % ---- Mode A ----
+    fprintf('\n--- Mode A (Rel-19 §5.2.2.2.1a, modeA) ---\n');
+    repCfg_r19.CodebookMode = 1;
+    best_ri_A = 1;  best_rate_A = -Inf;
+    for ri_try = 1:ri_max
         try
             [~, info_try] = nr5g.internal.nrPMIReport( ...
                 carrier, csirs{1}, repCfg_r19, ri_try, H_r19, nVar_r19);
-            sinr_vals = info_try.SINRPerREPMI(:);
-            rate_sum  = sum(log2(1 + sinr_vals(isfinite(sinr_vals) & sinr_vals >= 0)));
-            sinr_db   = 10*log10(mean(sinr_vals(isfinite(sinr_vals) & sinr_vals > 0)));
-            fprintf('    RI=%d: avg SINR=%.1fdB, rate_sum=%.1f\n', ri_try, sinr_db, rate_sum);
-            if rate_sum > best_rate
-                best_rate       = rate_sum;
-                best_ri         = ri_try;
-                best_rate_final = rate_sum;
-            end
-        catch ME
-            fprintf('    [RI=%d failed: %s]\n', ri_try, ME.message);
-        end
+            sv_ = info_try.SINRPerREPMI(:);
+            rate_ = sum(log2(1 + sv_(isfinite(sv_) & sv_ >= 0)));
+            fprintf('    RI=%d: avg SINR=%.1fdB, rate=%.1f\n', ri_try, ...
+                10*log10(mean(sv_(isfinite(sv_) & sv_>0))), rate_);
+            if rate_ > best_rate_A;  best_rate_A = rate_;  best_ri_A = ri_try;  end
+        catch ME;  fprintf('    [RI=%d failed: %s]\n', ri_try, ME.message);  end
     end
+    [pmiSet_A, info_A] = nr5g.internal.nrPMIReport( ...
+        carrier, csirs{1}, repCfg_r19, best_ri_A, H_r19, nVar_r19);
+    W_A      = info_A.W;
+    cap_modeA = real(log2(det(eye(nRxAntennas) + ...
+        (1/(nVar_r19*best_ri_A)) * (H_wb_r19*W_A*(H_wb_r19*W_A)'))));
+    sinr_A_dB = 10*log10(mean(info_A.SINRPerREPMI, 1, 'omitnan'));
+    cqi_A     = arrayfun(@(s) max(sum(s >= cqi_tbl), 1), sinr_A_dB);
+    fprintf('  RI=%d  i1=%s  i2=%s\n', best_ri_A, mat2str(pmiSet_A.i1-1), mat2str(pmiSet_A.i2-1));
+    fprintf('  Per-layer SINR: [%s] dB\n', num2str(sinr_A_dB,'%.1f '));
+    fprintf('  Per-layer CQI:  [%s]\n',    num2str(cqi_A,'%d '));
 
-    % Final PMI/CQI at selected RI
-    [pmiSet_r19, info_r19] = nr5g.internal.nrPMIReport( ...
-        carrier, csirs{1}, repCfg_r19, best_ri, H_r19, nVar_r19);
+    % ---- Mode B ----
+    fprintf('\n--- Mode B (Rel-19 §5.2.2.2.1a, modeB) ---\n');
+    repCfg_r19.CodebookMode = 2;
+    best_ri_B = 1;  best_rate_B = -Inf;
+    for ri_try = 1:ri_max
+        try
+            [~, info_try] = nr5g.internal.nrPMIReport( ...
+                carrier, csirs{1}, repCfg_r19, ri_try, H_r19, nVar_r19);
+            sv_ = info_try.SINRPerREPMI(:);
+            rate_ = sum(log2(1 + sv_(isfinite(sv_) & sv_ >= 0)));
+            fprintf('    RI=%d: avg SINR=%.1fdB, rate=%.1f\n', ri_try, ...
+                10*log10(mean(sv_(isfinite(sv_) & sv_>0))), rate_);
+            if rate_ > best_rate_B;  best_rate_B = rate_;  best_ri_B = ri_try;  end
+        catch ME;  fprintf('    [RI=%d failed: %s]\n', ri_try, ME.message);  end
+    end
+    [pmiSet_B, info_B] = nr5g.internal.nrPMIReport( ...
+        carrier, csirs{1}, repCfg_r19, best_ri_B, H_r19, nVar_r19);
+    W_B      = info_B.W;
+    cap_modeB = real(log2(det(eye(nRxAntennas) + ...
+        (1/(nVar_r19*best_ri_B)) * (H_wb_r19*W_B*(H_wb_r19*W_B)'))));
+    sinr_B_dB = 10*log10(mean(info_B.SINRPerREPMI, 1, 'omitnan'));
+    cqi_B     = arrayfun(@(s) max(sum(s >= cqi_tbl), 1), sinr_B_dB);
+    fprintf('  RI=%d  i1=%s  i2=%s\n', best_ri_B, mat2str(pmiSet_B.i1-1), mat2str(pmiSet_B.i2-1));
+    fprintf('  Per-layer SINR: [%s] dB\n', num2str(sinr_B_dB,'%.1f '));
+    fprintf('  Per-layer CQI:  [%s]\n',    num2str(cqi_B,'%d '));
 
-    fprintf('  RI selected:      %d\n', best_ri);
-    fprintf('  PMI i1 (0-based): %s\n', mat2str(pmiSet_r19.i1 - 1));
-    fprintf('  PMI i2 (0-based): %s\n', mat2str(pmiSet_r19.i2 - 1));
-
-    % CQI from SINR (TS 38.214 Table 5.2.2.1-2)
-    cqi_tbl_r19 = [-6.7,-4.7,-2.3,0.2,2.4,4.7,6.9,9.3,10.7,12.2,14.1,15.6,18.0,20.3,22.7];
-    sinr_r19_dB = 10*log10(mean(info_r19.SINRPerREPMI, 1, 'omitnan'));
-    cqi_r19     = arrayfun(@(s) max(sum(s >= cqi_tbl_r19), 1), sinr_r19_dB);
-    fprintf('  Per-layer SINR:   [%s] dB\n', num2str(sinr_r19_dB, '%.1f '));
-    fprintf('  Per-layer CQI:    [%s]\n',    num2str(cqi_r19,     '%d '));
-
-    % --- Channel rank analysis + approach comparison ---
-    % All computed from wideband H_wb_r19 [nRx x nTx] for fair comparison
+    % ---- SVD upper bound + comparison table ----
     [~, S_wb, ~] = svd(H_wb_r19, 'econ');
     sv     = diag(S_wb);
     snr_sv = sv.^2 / nVar_r19;
     cap_sv = log2(1 + snr_sv);
     cap_svd_wb = sum(cap_sv);
 
-    % Mode A capacity: H_wb_r19 [nRx×nTx] × W [nTx×ri] → H_eff [nRx×ri]
-    W_modeA   = info_r19.W;                           % [128 x best_ri]
-    H_eff_A   = H_wb_r19 * W_modeA;                  % [4 x best_ri]
-    snr_A     = 1 / (nVar_r19 * best_ri);
-    cap_modeA = real(log2(det(eye(nRxAntennas) + snr_A * (H_eff_A * H_eff_A'))));
-
     fprintf('\n  --- Channel Rank Analysis (wideband H SVD) ---\n');
-    fprintf('  %-6s  %-14s  %-12s  %-18s\n', 'SV #', 'Singular val', 'SNR (dB)', 'Capacity (bits/s/Hz)');
+    fprintf('  %-6s  %-14s  %-12s  %-18s\n', 'SV #','Singular val','SNR (dB)','Capacity (bits/s/Hz)');
     for k = 1:length(sv)
         fprintf('  %-6d  %-14.3f  %-12.1f  %-18.2f\n', k, sv(k), 10*log10(snr_sv(k)), cap_sv(k));
     end
     fprintf('\n  --- Capacity Comparison (bits/s/Hz per channel use) ---\n');
-    fprintf('  %-35s  %-4s  %s\n', 'Approach', 'RI', 'Capacity');
-    fprintf('  %-35s  %-4d  %.2f\n', 'SVD upper bound',             length(sv), cap_svd_wb);
-    fprintf('  %-35s  %-4d  %.2f\n', 'Mode A (Rel-19 §5.2.2.2.1a)', best_ri,   cap_modeA);
+    fprintf('  %-38s  %-4s  %s\n', 'Approach', 'RI', 'Capacity');
+    fprintf('  %-38s  %-4d  %.2f\n', 'SVD upper bound',              length(sv), cap_svd_wb);
+    fprintf('  %-38s  %-4d  %.2f\n', 'Mode A (Rel-19 §5.2.2.2.1a)', best_ri_A,  cap_modeA);
+    fprintf('  %-38s  %-4d  %.2f\n', 'Mode B (Rel-19 §5.2.2.2.1a)', best_ri_B,  cap_modeB);
     fprintf('\n');
+
+    % Keep backward compat variables used by existing downstream code
+    best_ri  = best_ri_A;
+    pmiSet_r19 = pmiSet_A;
+    info_r19   = info_A;
 
 else
     % --- Approach A: Per-resource PMI/RI/CQI (32 ports each) ---
@@ -756,9 +770,11 @@ fprintf(' SNR:         %d dB\n', SNRdB);
 fprintf(' CE NMSE:     %.2f dB\n', 10*log10(mean(nmse_per_port)));
 if ThangTQ23_128T128R_Rel19
     fprintf(' Codebook:    typeI-SinglePanel-r19 (TS 38.214 §5.2.2.2.1a)\n');
-    fprintf(' Rel-19 RI:   %d layers\n', best_ri);
-    fprintf(' Rel-19 CQI:  [%s]\n', num2str(cqi_r19, '%d '));
-    fprintf(' Layer SINR:  [%s] dB\n', num2str(sinr_r19_dB, '%.1f '));
+    fprintf(' Mode A RI:   %d  |  Mode B RI:  %d\n', best_ri_A, best_ri_B);
+    fprintf(' Mode A CQI:  [%s]\n', num2str(cqi_A, '%d '));
+    fprintf(' Mode B CQI:  [%s]\n', num2str(cqi_B, '%d '));
+    fprintf(' Mode A SINR: [%s] dB\n', num2str(sinr_A_dB, '%.1f '));
+    fprintf(' Mode B SINR: [%s] dB\n', num2str(sinr_B_dB, '%.1f '));
 else
     fprintf(' Codebook:    Type1SinglePanel Rel-15/16 (SVD baseline)\n'); %#ok<UNRCH>
     fprintf(' SVD RI:      %d layers\n', ri_svd);
