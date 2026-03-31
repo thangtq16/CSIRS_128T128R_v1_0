@@ -1,0 +1,26 @@
+=== 128T128R CSI-RS SNR Sweep (v2) ===
+Carrier: 52 PRBs, SCS 30 kHz
+Channel: CDL-B, DS=100ns, fD=5Hz, fc=4.9GHz
+
+Starting sweep: 3 SNR points x 20 realizations each
+(Total runs: 60)
+
+  SNR= -5dB  |  RI: B=4.00 C=3.00 D=3.00  |  TP(Mbps): B=216.2 C=59.6 D=73.2
+  SNR=+10dB  |  RI: B=4.00 C=4.00 D=4.00  |  TP(Mbps): B=332.7 C=181.5 D=197.3
+  SNR=+25dB  |  RI: B=4.00 C=4.00 D=4.00  |  TP(Mbps): B=332.7 C=216.2 D=233.8
+
+========================================================================================
+       128T128R CSI FEEDBACK -- SNR SWEEP RESULTS (avg over realizations)            
+========================================================================================
+Approach        SNR=-5dB (far)                            SNR=+10dB (med)                           SNR=+25dB (near)                        
+                RI      MCS     TP(Mbps)    % vsB   RI      MCS     TP(Mbps)    % vsB   RI      MCS     TP(Mbps)    % vsB 
+--------------------------------------------------------------------------------------------------------------
+B: SVD (ref)    4.00    21.0    216.2         ref   4.00    28.0    332.7         ref   4.00    28.0    332.7         ref 
+--------------------------------------------------------------------------------------------------------------
+C: Mode A       3.00    9.6     59.6         27.6%  4.00    19.0    181.5        54.5%  4.00    21.0    216.2        65.0%
+D: Mode B       3.00    11.7    73.2         33.9%  4.00    19.9    197.3        59.3%  4.00    22.0    233.8        70.3%
+--------------------------------------------------------------------------------------------------------------
+  RI: avg rank indicator  |  MCS: avg MCS index (1-15)  |  TP: throughput Mbps
+  % vsB: throughput relative to SVD upper bound
+
+>> 

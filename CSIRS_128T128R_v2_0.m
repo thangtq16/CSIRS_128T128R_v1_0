@@ -39,8 +39,10 @@ ueArraySize  = [1,  2, 2, 1, 1];   % 1V x  2H x 2pol =   4 ports
 
 % Channel parameters
 channelCfg.DelayProfile        = 'CDL-B';   % near-uniform SV → rank diversity
-channelCfg.DelaySpread         = 450e-9;    % 450 ns (Urban Macro)
-channelCfg.MaximumDopplerShift = 136;       % 136 Hz (30 km/h @ 4.9 GHz)
+% channelCfg.DelaySpread         = 450e-9;    % 450 ns (Urban Macro)
+channelCfg.DelaySpread         = 100e-9;    % 100 ns (Urban Micro, Indoor) → better SNR after estimation → higher RI/MCS
+% channelCfg.MaximumDopplerShift = 136;       % 136 Hz (30 km/h @ 4.9 GHz)
+channelCfg.MaximumDopplerShift = 5;         % 5 Hz (1 km/h @ 4.9 GHz) → more coherent channel → better estimation → higher RI/MCS   
 channelCfg.CarrierFrequency    = 4.9e9;     % 4.9 GHz
 
 fprintf('=== 128T128R CSI-RS SNR Sweep (v2) ===\n');

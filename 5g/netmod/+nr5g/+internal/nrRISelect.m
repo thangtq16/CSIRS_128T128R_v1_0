@@ -365,7 +365,10 @@ function [RI,PMISet,PMIInfo] = nrRISelect(carrier,csirs,reportConfig,H,varargin)
 
     % Calculate the maximum possible transmission rank according to
     % codebook type
-    if strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
+    if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        % Rel-19 Refined Type I Single-Panel: max rank 4
+        maxRank = min(nRxAnts, 4);
+    elseif strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
         % Maximum possible rank is 8 for Type I single-panel codebooks, as
         % defined in TS 38.214 Section 5.2.2.2.1
         maxRank = min([nRxAnts Pcsirs 8]);
@@ -396,7 +399,10 @@ function [RI,PMISet,PMIInfo] = nrRISelect(carrier,csirs,reportConfig,H,varargin)
     [RI, PMISet] = initOutputs(reportConfig,PMISubbandInfo);
 
     if ~isempty(validRanks) && ~isempty(csirsInd)
-        if strcmpi(alg,'MaxSINR')
+        if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+            % Rel-19: capacity-based RI selection via nrPMIReport
+            [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,validRanks);
+        elseif strcmpi(alg,'MaxSINR')
             [RI,PMISet,PMIInfo] = riSelectPMI(carrier,csirs,reportConfig,H,nVar,validRanks,PMISubbandInfo);
         else % maxSE
             [RI,PMISet,PMIInfo] = riSelectCQI(carrier,csirs,reportConfig,H,nVar,validRanks,PMISubbandInfo);
@@ -507,7 +513,10 @@ function [RI, PMISet] = initOutputs(reportConfig,PMISubbandInfo)
 %   rank and PMI set values with NaNs.
 
     RI = NaN;
-    if strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
+    if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        % nrPMIReport returns its own struct format; placeholder only
+        PMISet = struct('W', []);
+    elseif strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
         PMISet.i1 = NaN(1,3);
         PMISet.i2 = NaN*ones(1,PMISubbandInfo.NumSubbands);
     else
@@ -583,7 +592,7 @@ function [reportConfig,csirsInd,nVar,alg] = validateInputs(carrier,csirs,reportC
 
     % Check for the presence of 'CodebookType' field
     if isfield(reportConfig,'CodebookType')
-        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2'},fcnName,'CodebookType field');
+        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2','typeI-SinglePanel-r19'},fcnName,'CodebookType field');
     else
         reportConfig.CodebookType = 'Type1SinglePanel';
     end
@@ -654,7 +663,10 @@ function [reportConfig,csirsInd,nVar,alg] = validateInputs(carrier,csirs,reportC
     end
 
     % Validate 'RIRestriction'
-    if strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
+    if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        maxRank = 4;
+        codebookType = 'Rel-19 refined type I single-panel';
+    elseif strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
         maxRank = 8;
         codebookType = 'type I single-panel';
     elseif strcmpi(reportConfig.CodebookType,'Type1MultiPanel')
@@ -665,7 +677,7 @@ function [reportConfig,csirsInd,nVar,alg] = validateInputs(carrier,csirs,reportC
         codebookType = 'type II';
     else % Enhanced type II codebook
         maxRank = 4;
-        codebookType = 'enhanced type II';       
+        codebookType = 'enhanced type II';
     end
 
     if isfield(reportConfig,'RIRestriction') && ~isempty(reportConfig.RIRestriction)
@@ -705,10 +717,61 @@ function [reportConfig,csirsInd,nVar,alg] = validateInputs(carrier,csirs,reportC
     if ~isempty(csirsInd)
         K = carrier.NSizeGrid*12;
         L = carrier.SymbolsPerSlot;
-        NumCSIRSPorts = csirs.NumCSIRSPorts(1);
+        % For Rel-19 the CSI-RS resource only covers 32 ports, but H covers
+        % all 128 TX antennas — use actual H dimension instead of csirs port count
+        if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+            NumCSIRSPorts = size(H,4);
+        else
+            NumCSIRSPorts = csirs.NumCSIRSPorts(1);
+        end
         validateattributes(H,{class(H)},{'size',[K L NaN NumCSIRSPorts]},fcnName,'H');
     end
 
     % Validate 'nVar'
     validateattributes(nVar,{'double','single'},{'scalar','real','nonnegative','finite'},fcnName,'NVAR');
+end
+
+% ── Rel-19 RI selection via capacity maximization ────────────────────────────
+function [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,validRanks)
+%RISELECTR19  Select RI for typeI-SinglePanel-r19 using nrPMIReport + capacity.
+%
+%  For each candidate rank in validRanks, call nrPMIReport to get the optimal
+%  Rel-19 precoder W, then evaluate the capacity:
+%    cap = log2(det(I + (1/nVar)*H_wb*W*W'*H_wb'))
+%  The rank that maximises capacity is selected.
+
+    RI = NaN;
+    PMISet = struct('W',[]);
+    PMIInfo = struct();
+
+    % Wideband channel: average over subcarriers (dim1) and symbols (dim2)
+    H_wb = reshape(mean(mean(H,1),2), size(H,3), size(H,4));
+    nRx  = size(H_wb,1);
+
+    % Build nrCSIReportConfig for nrPMIReport
+    r19cfg                    = nrCSIReportConfig;
+    r19cfg.NSizeBWP           = reportConfig.NSizeBWP;
+    r19cfg.NStartBWP          = reportConfig.NStartBWP;
+    r19cfg.CodebookType       = 'typeI-SinglePanel-r19';
+    r19cfg.PanelDimensions    = reportConfig.PanelDimensions;
+    r19cfg.PMIFormatIndicator = 'wideband';
+    r19cfg.CodebookMode       = reportConfig.CodebookMode;
+
+    bestCap = -Inf;
+    for rank = validRanks
+        try
+            [pmiSet_try, pmiInfo_try] = nr5g.internal.nrPMIReport( ...
+                carrier, csirs, r19cfg, rank, H, nVar);
+            W   = pmiInfo_try.W;
+            HW  = H_wb * W;
+            cap = real(log2(det(eye(nRx) + (1/nVar) * (HW * HW'))));
+            if cap > bestCap
+                bestCap  = cap;
+                RI       = rank;
+                PMISet   = pmiSet_try;
+                PMIInfo  = pmiInfo_try;
+            end
+        catch
+        end
+    end
 end

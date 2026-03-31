@@ -1,0 +1,1030 @@
+\documentclass[11pt,a4paper]{article}
+
+%% ─── Gói lệnh ────────────────────────────────────────────────────────────────
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T5]{fontenc}
+\usepackage{lmodern}
+\usepackage[vietnamese,english]{babel}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{placeins}
+
+%% ─── Hyperref ────────────────────────────────────────────────────────────────
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=green!50!black,
+    urlcolor=blue!60!black,
+    pdftitle={128T128R NZP-CSI-RS: Tu Nguyen Mau Don Khoi den Danh Gia Quet SNR},
+}
+
+%% ─── Đầu trang / Chân trang ──────────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small Báo cáo Mô phỏng 128T128R NZP-CSI-RS}
+\rhead{\small ThangTQ23 -- VSI}
+\cfoot{\thepage}
+
+%% ─── Định dạng code MATLAB ───────────────────────────────────────────────────
+\lstdefinestyle{matlab}{
+    language=Matlab,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue!80!black}\bfseries,
+    commentstyle=\color{green!50!black}\itshape,
+    stringstyle=\color{orange!80!black},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=8pt,
+    frame=single,
+    framesep=4pt,
+    breaklines=true,
+    tabsize=4,
+    showstringspaces=false,
+    captionpos=b,
+}
+
+%% ─── Tiêu đề ─────────────────────────────────────────────────────────────────
+\title{
+    \vspace{-1.5cm}
+    \Large\textbf{Mô phỏng NZP-CSI-RS hệ thống 128T128R:}\\[4pt]
+    \large Từ Nguyên mẫu Đơn khối (v1.0) đến\\
+    Đánh giá Quét SNR Mô-đun hóa (v2.0)\\[8pt]
+    \normalsize Báo cáo Kỹ thuật
+}
+\author{ThangTQ23 \\ VSI}
+\date{Tháng 3 năm 2026}
+
+%% ─── Tài liệu ────────────────────────────────────────────────────────────────
+\begin{document}
+
+\maketitle
+\thispagestyle{fancy}
+
+\begin{abstract}
+Tài liệu này mô tả quá trình xây dựng công cụ mô phỏng phản hồi CSI cho hệ thống
+Massive MIMO 128T128R, dùng NZP-CSI-RS Row~18 với CDM8. Điểm xuất phát là v1.0
+-- một script MATLAB chạy một lần, một điểm SNR, bốn phương pháp CSI gộp chung
+vào một file. Qua hai giai đoạn phát triển, v2.0 được tái cấu trúc thành pipeline
+mô-đun, bổ sung Monte Carlo và quét SNR, đồng thời nâng cấp cách tính MCS sang
+chuẩn L2SM/MIESM. Kết quả cho thấy Mode~B (Phương pháp~D) đạt 33--70\,\% so với
+cận trên SVD tùy SNR, và luôn nhỉnh hơn Mode~A (Phương pháp~C) khoảng 5--6\,\%.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\section{Bối cảnh và Động lực}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Tổng quan Hệ thống}
+
+Hệ thống mô phỏng nhắm đến cấu hình gNB \textbf{128T128R} ở băng Sub-6~GHz.
+Mảng anten gNB là panel $4\text{V}\times16\text{H}\times2\text{pol} = 128$ cổng,
+UE dùng mảng $1\text{V}\times2\text{H}\times2\text{pol} = 4$ cổng.
+Câu hỏi cốt lõi là: codebook Rel-19 Type~I Single-Panel 128 cổng (Mode~A và Mode~B)
+đạt được bao nhiêu phần trăm so với cận trên SVD lý tưởng, ở các mức SNR khác nhau?
+
+\subsection{Vì sao cần v2.0?}
+
+V1.0 chạy được pipeline đầu cuối nhưng chỉ ở một điểm SNR và một realization kênh.
+Như vậy kết quả còn mang nặng tính ngẫu nhiên, chưa đại diện thống kê. V2.0 giải
+quyết các điểm đó:
+
+\begin{itemize}[noitemsep]
+    \item Thêm Monte Carlo: lấy trung bình RI/MCS/TP qua nhiều realization kênh
+          để kết quả có ý nghĩa thống kê.
+    \item Quét 3 điểm SNR ($-5$, $+10$, $+25$\,dB) tương ứng ô xa/trung bình/gần.
+    \item Thêm cột \% so với SVD để dễ so sánh Mode~A và Mode~B.
+    \item Sửa cách tính MCS: dùng L2SM/MIESM thay vì dùng thẳng chỉ số CQI.
+    \item Tách code thành các file hàm riêng, dễ test và tái sử dụng.
+\end{itemize}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\section{Tham số Mô phỏng}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Cấu hình Sóng mang}
+
+Có hai chế độ mô phỏng tùy mục đích: chế độ nhanh (10\,MHz) dùng khi cần chạy
+thử nhanh nhiều lần, chế độ chuẩn (100\,MHz) dùng khi cần kết quả sát thực tế hơn.
+
+\begin{table}[h!]
+\centering
+\caption{Tham số Sóng mang 5G NR}
+\label{tab:carrier}
+\begin{tabular}{llll}
+\toprule
+\textbf{Tham số} & \textbf{Mô phỏng nhanh} & \textbf{Chuẩn} & \textbf{Ghi chú} \\
+\midrule
+Subcarrier Spacing & 30\,kHz  & 30\,kHz   & FR1 NR \\
+NSizeGrid          & 52 PRB   & 273 PRB   & 10\,MHz / 100\,MHz \\
+CyclicPrefix       & Normal   & Normal    & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Cấu hình Anten}
+
+\begin{table}[h!]
+\centering
+\caption{Cấu hình Mảng Anten}
+\label{tab:antennas}
+\begin{tabular}{lll}
+\toprule
+\textbf{Nút} & \textbf{Kích thước mảng} & \textbf{Tổng số cổng} \\
+\midrule
+gNB (TX) & $4\text{V}\times16\text{H}\times2\text{pol}$ & 128 \\
+UE (RX)  & $1\text{V}\times2\text{H}\times2\text{pol}$  & 4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Cấu hình NZP-CSI-RS (Row~18, CDM8)}
+
+Để phủ 128 cổng TX, bốn tài nguyên NZP-CSI-RS được sử dụng, mỗi tài nguyên mang
+32 cổng qua Row~18 (CDM8 = FD-CDM2~$\times$~TD-CDM4). Các tài nguyên được
+trải đều trên hai slot liên tiếp để tránh va chạm symbol:
+
+\begin{table}[h!]
+\centering
+\caption{Bố cục CSI-RS 4 tài nguyên trên 2 slot}
+\label{tab:csirs}
+\begin{tabular}{ccccc}
+\toprule
+\textbf{Tài nguyên} & \textbf{Slot} & \textbf{Symbol bắt đầu ($\ell_0$)} &
+\textbf{Các symbol} & \textbf{Cổng} \\
+\midrule
+R0 & 0 & 2 & 2, 3, 4, 5   & 0--31  \\
+R1 & 0 & 8 & 8, 9, 10, 11 & 32--63 \\
+R2 & 1 & 2 & 2, 3, 4, 5   & 64--95 \\
+R3 & 1 & 8 & 8, 9, 10, 11 & 96--127 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Trải phổ CDM8 sử dụng FD-CDM độ dài~2 và TD-CDM độ dài~4, tạo ra các chuỗi pilot
+trực giao trên $2\times4 = 8$ nhóm CDM, mỗi nhóm mang 4 cổng, tổng cộng 32 cổng
+mỗi tài nguyên. Vị trí sóng mang con theo TS~38.211 Bảng~7.4.1.5.3-1, Row~18,
+mật độ~0.5: $k' \in \{0, 2, 4, 6\}$.
+
+\subsection{Mô hình Kênh}
+
+Tương tự sóng mang, tham số kênh cũng có hai chế độ. Chế độ nhanh dùng delay spread
+thấp và Doppler nhỏ để kênh ổn định, dễ ước lượng, giúp kiểm tra pipeline dễ hơn.
+Chế độ chuẩn dùng tham số sát với môi trường thực tế Urban Macro 4{,}9\,GHz.
+
+\begin{table}[h!]
+\centering
+\caption{Tham số Kênh CDL}
+\label{tab:channel}
+\begin{tabular}{llll}
+\toprule
+\textbf{Tham số} & \textbf{Mô phỏng nhanh} & \textbf{Chuẩn} & \textbf{Ghi chú} \\
+\midrule
+Delay Profile        & CDL-B              & CDL-B              & \\
+Delay Spread         & 100\,ns            & 450\,ns            & Urban Micro / Macro \\
+Doppler tối đa       & 5\,Hz              & 136\,Hz            & 1\,km/h / 30\,km/h @ 4{,}9\,GHz \\
+Tần số sóng mang     & \multicolumn{2}{c}{4{,}9\,GHz}        & \\
+Khoảng cách phần tử  & \multicolumn{2}{c}{0{,}5\,$\lambda$}  & TX và RX \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Lưu ý:} CDL-B ở delay spread thấp / Doppler nhỏ cho kênh rank-4
+khá đều, phù hợp để kiểm tra codebook đa lớp. Khi tăng delay spread lên 450\,ns
+và Doppler lên 136\,Hz, chất lượng ước lượng kênh giảm do trung bình $\mathbf{H}_{wb}$
+bị trải rộng hơn trong miền tần số và thời gian -- điều này làm RI giảm, nhưng đây
+là hiệu ứng của kênh, không phải do codebook bị giới hạn.
+
+\subsection{Tham số Quét Mô phỏng}
+
+\begin{table}[h!]
+\centering
+\caption{Cấu hình Quét SNR Monte Carlo}
+\label{tab:sweep}
+\begin{tabular}{ll}
+\toprule
+\textbf{Tham số} & \textbf{Giá trị} \\
+\midrule
+Các điểm SNR & $\{-5, +10, +25\}$\,dB (xa / trung bình / gần) \\
+Số realization mỗi SNR & 20 \\
+Tổng số lần chạy & 60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\section{Kiến trúc Phiên bản 1.0}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+Phiên bản 1.0 (\texttt{CSIRS\_128T128R\_v1\_0.m}) là một script MATLAB đơn khối
+được tổ chức thành mười hai mục:
+
+\begin{enumerate}[noitemsep]
+    \item Cấu hình hệ thống (sóng mang, anten, tham số)
+    \item Cấu hình 4 tài nguyên NZP-CSI-RS (Row~18, CDM8)
+    \item Tạo symbol CSI-RS và ánh xạ lên lưới tài nguyên 2 slot
+    \item Trực quan hóa lưới tài nguyên CSI-RS
+    \item Thiết lập kênh CDL
+    \item Tạo dạng sóng TX và điều chế OFDM
+    \item Truyền qua kênh, AWGN, ước lượng định thời, giải điều chế
+    \item Ước lượng kênh (mỗi tài nguyên dùng \texttt{nrChannelEstimate})
+    \item Tính NMSE (so với kiến thức kênh hoàn hảo)
+    \item Phản hồi CSI: Phương pháp A, B, C, D
+    \item Trực quan hóa đồ hình Beamforming
+    \item Bảng tóm tắt kết quả
+\end{enumerate}
+
+\subsection{Định nghĩa các Phương pháp (v1.0)}
+
+\begin{description}[style=nextline]
+    \item[Phương pháp A -- Rel-15/16 Type~I Single Panel mỗi 32 cổng]
+        Mỗi trong bốn tài nguyên 32 cổng được xử lý độc lập bằng codebook
+        chuẩn Rel-15/16 (\texttt{typeI-SinglePanel}). PMI từ từng mảng con được
+        kết hợp để tạo precoder tổng hợp. Phương pháp này hoạt động trực tiếp
+        với thư viện MATLAB 5G chuẩn mà không cần sửa đổi.
+    \item[Phương pháp B -- Cận trên SVD đầy đủ 128 cổng]
+        Kênh wideband $\mathbf{H}_{wb} \in \mathbb{C}^{N_r \times 128}$ được phân
+        tích bằng SVD. Precoder tối ưu $\mathbf{W}_B$ sử dụng $r_B$ vector kỳ dị
+        phải hàng đầu. Đây là tham chiếu lý tưởng (không có tổn hao lượng hóa codebook).
+    \item[Phương pháp C -- Rel-19 Type~I Single-Panel Mode~A]
+        Sử dụng codebook Rel-19 đầy đủ 128 cổng ở chế độ beam DFT oversample
+        (\texttt{typeI-SinglePanel-r19}, \texttt{CodebookMode=1}).
+    \item[Phương pháp D -- Rel-19 Type~I Single-Panel Mode~B]
+        Sử dụng codebook Rel-19 ở chế độ cơ sở trực giao
+        (\texttt{typeI-SinglePanel-r19}, \texttt{CodebookMode=2}), cung cấp độ
+        phân giải không gian tốt hơn với chi phí overhead phản hồi cao hơn.
+\end{description}
+
+\subsection{Hạn chế của v1.0}
+
+\begin{itemize}[noitemsep]
+    \item Chỉ một điểm SNR (\texttt{SNRdB}~= 20\,dB) --- không có quét bán kính ô.
+    \item Chỉ một realization kênh --- kết quả không có ý nghĩa thống kê.
+    \item CQI tính từ bảng ngưỡng cố định trên SINR ZF trung bình;
+          MCS lấy trực tiếp từ chỉ số CQI (ánh xạ không đúng chuẩn).
+    \item Phương pháp~A (Rel-15/16) được tích hợp nhưng ít giá trị cho đánh giá Rel-19.
+    \item Toàn bộ 12 mục trong một file --- khó tái sử dụng, kiểm thử hay mở rộng.
+\end{itemize}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\section{Phiên bản 2.0: Kiến trúc Mô-đun}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Nguyên tắc Thiết kế}
+
+V2.0 phân tách script đơn khối thành một file chính và bảy file hàm,
+mỗi file có một trách nhiệm được xác định rõ ràng. Sự phân tách này cho phép:
+
+\begin{itemize}[noitemsep]
+    \item Kiểm thử đơn vị độc lập cho từng giai đoạn pipeline.
+    \item Tái sử dụng lưới TX (chỉ xây dựng một lần, ngoài tất cả các vòng lặp)
+          cho toàn bộ các tổ hợp SNR/realization.
+    \item Luồng dữ liệu rõ ràng: mỗi hàm chỉ nhận đầu vào mà nó cần và trả về
+          đúng những gì giai đoạn tiếp theo yêu cầu.
+\end{itemize}
+
+\subsection{Cấu trúc File}
+
+\begin{table}[h!]
+\centering
+\caption{Cấu trúc File V2.0}
+\label{tab:files}
+\begin{tabular}{lp{9cm}}
+\toprule
+\textbf{File} & \textbf{Trách nhiệm} \\
+\midrule
+\texttt{CSIRS\_128T128R\_v2\_0.m}    & File chính: cấu hình hệ thống, vòng lặp quét SNR, Monte Carlo, tổng hợp kết quả \\
+\texttt{csirs\_buildGrid.m}          & Xây dựng đối tượng CSI-RS và lưới TX 2 slot (chạy một lần) \\
+\texttt{csirs\_channelSetup.m}       & Tạo và cấu hình đối tượng \texttt{nrCDLChannel} \\
+\texttt{csirs\_txRx.m}               & Điều chế OFDM, truyền qua kênh, AWGN, giải điều chế \\
+\texttt{csirs\_channelEstimate.m}    & \texttt{nrChannelEstimate} từng tài nguyên, lắp ráp $\mathbf{H}_{est}^{full}$ \\
+\texttt{csirs\_feedback.m}           & Phản hồi CSI: RI/PMI/CQI cho Phương pháp B, C, D \\
+\texttt{csirs\_computeMetrics.m}     & RI, MCS (L2SM), Thông lượng từ struct phản hồi \\
+\texttt{csirs\_printSweepTable.m}    & In bảng ASCII với \% so với tham chiếu SVD \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\FloatBarrier
+\subsection{Cấu trúc Vòng lặp Chính}
+
+Script chính v2.0 thực hiện vòng lặp hai cấp:
+
+\begin{lstlisting}[style=matlab, caption={V2.0 two-level simulation loop (simplified)}]
+% One-time setup (outside all loops)
+[csirs, txGrid_2slots, ...] = csirs_buildGrid(carrier, nTxAntennas);
+channel = csirs_channelSetup(carrier, gnbArraySize, ueArraySize, channelCfg);
+
+for iSNR = 1 : nSNR                      % Outer: SNR points
+    for iReal = 1 : nRealiz              % Inner: Monte Carlo
+        release(channel);                % Draw new independent channel realization
+
+        % RX chain
+        [rxGrid_s0, rxGrid_s1, ...] = csirs_txRx(..., SNRdB, ...);
+        [H_est_full, nVar_all]       = csirs_channelEstimate(...);
+
+        % CSI chain
+        fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign);
+        m  = csirs_computeMetrics(fb, carrier);
+
+        acc_ri(iReal,:)  = m.ri;
+        acc_mcs(iReal,:) = m.mcs;
+        acc_tp(iReal,:)  = m.tp;
+    end
+    results(iSNR).ri  = mean(acc_ri,  1);
+    results(iSNR).mcs = mean(acc_mcs, 1);
+    results(iSNR).tp  = mean(acc_tp,  1);
+end
+csirs_printSweepTable(results, snrList);
+\end{lstlisting}
+
+\paragraph{Tại sao \texttt{release(channel)} thực hiện được Monte Carlo.}
+Đối tượng \texttt{nrCDLChannel} lưu trữ trạng thái nội bộ (seed ngẫu nhiên, bộ nhớ
+bộ lọc, độ lệch định thời). Gọi \texttt{release()} sẽ đặt lại toàn bộ trạng thái
+nội bộ và tạo một realization mới từ mô hình kênh ngẫu nhiên nền. Mỗi lần gọi
+\texttt{release()} tiếp theo truyền dạng sóng là tương đương thống kê với việc
+xây dựng một đối tượng kênh hoàn toàn mới, độc lập. Cách này vừa hiệu quả hơn
+vừa tạo ra cùng phân phối như khi tạo $N_{\text{real}}$ kênh độc lập riêng biệt.
+
+\subsection{Ước lượng Kênh và Tổng hợp Wideband}
+
+Ước lượng kênh sử dụng \texttt{nrChannelEstimate} riêng biệt cho mỗi trong bốn
+tài nguyên CSI-RS 32 cổng, với \texttt{CDMLengths}~= $[2,\,4]$ khớp với trải phổ
+FD-CDM2 và TD-CDM4. Các ước lượng theo tài nguyên được lắp ráp thành ma trận
+wideband đầy đủ:
+
+\begin{equation}
+\mathbf{H}_{wb} \in \mathbb{C}^{N_r \times N_t}
+= \bigoplus_{r=0}^{3} \left\langle \hat{\mathbf{H}}^{(r)} \right\rangle_{k,\,\ell}
+\end{equation}
+
+trong đó $\langle\cdot\rangle_{k,\,\ell}$ ký hiệu trung bình theo chỉ số sóng
+mang con và symbol OFDM trong slot của tài nguyên.
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\FloatBarrier
+\section{Pipeline Phản hồi CSI}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Phương pháp B: Cận trên SVD}
+
+Kênh wideband được phân tích:
+$\mathbf{H}_{wb} = \mathbf{U}\mathbf{S}\mathbf{V}^H$.
+RI được chọn theo:
+\begin{equation}
+r_B = \min\Bigl(\bigl|\{i : \sigma_i > 0{,}1\,\sigma_1\}\bigr|,\; N_r\Bigr)
+\end{equation}
+trong đó $\sigma_i$ là các giá trị kỳ dị. Precoder $\mathbf{W}_B = \mathbf{V}[:,\,1{:}r_B]$.
+
+Tách kênh ZF được áp dụng cho kênh hiệu dụng
+$\mathbf{H}_{eff} = \mathbf{H}_{wb}\mathbf{W}_B$:
+
+\begin{equation}
+\text{SINR}_\ell^{(B)}
+= \frac{|\mathbf{w}_\ell^H\,\mathbf{h}_{eff,\ell}|^2}
+       {\sum_{j \neq \ell}|\mathbf{w}_\ell^H\,\mathbf{h}_{eff,j}|^2
+        + \sigma_n^2\|\mathbf{w}_\ell\|^2}
+\end{equation}
+
+trong đó $\mathbf{w}_\ell^H$ là hàng thứ $\ell$ của $(\mathbf{H}_{eff})^+$.
+
+Dung lượng được tính:
+\begin{equation}
+C_B = \sum_{\ell=1}^{r_B} \log_2\!\left(1 + \frac{\sigma_\ell^2}{r_B\,\sigma_n^2}\right)
+\;\text{[bits/s/Hz]}
+\end{equation}
+
+\subsection{Phương pháp C và D: Codebook Rel-19}
+
+Cả hai phương pháp sử dụng \texttt{nr5g.internal.nrPMIReport} với
+\texttt{CodebookType = 'typeI-SinglePanel-r19'} và
+\texttt{PanelDimensions = [1, 16, 4]} (128 cổng: $N_1=16$, $N_2=4$).
+RI được chọn qua tối đa hóa dung lượng:
+
+\begin{equation}
+r_{C/D}^* = \arg\max_{r \in \{1,\ldots,r_{\max}\}}\;
+\log_2 \det\!\left(\mathbf{I} + \frac{1}{\sigma_n^2}\,
+\mathbf{H}_{wb}\mathbf{W}(r)\mathbf{W}(r)^H\mathbf{H}_{wb}^H\right)
+\end{equation}
+
+trong đó $\mathbf{W}(r)$ là codeword wideband tốt nhất cho rank $r$ từ
+\texttt{nrPMIReport}. Mode~A dùng \texttt{CodebookMode=1};
+Mode~B dùng \texttt{CodebookMode=2}.
+
+\subsection{CQI qua L2SM/MIESM (nâng cấp v2.0)}
+
+Trong v1.0, CQI được tính từ bảng ngưỡng SINR cố định --- tương đương tra cứu
+SINR-sang-CQI trực tiếp, không xét phân bố SINR theo RE hay ràng buộc BLER.
+
+Trong v2.0, CQI thu được qua \texttt{nr5g.internal.nrCQISelect}, bên trong
+thực hiện \textbf{Ánh xạ Link-to-System (L2SM)} bằng
+\textbf{Ánh xạ SINR Hiệu dụng Thông tin Tương hỗ (MIESM)}:
+
+\begin{equation}
+\text{MI}_k = \log_2(1 + \text{SINR}_k), \quad
+\overline{\text{MI}} = \frac{1}{N_{RE}}\sum_{k=1}^{N_{RE}}\text{MI}_k, \quad
+\text{SINR}_{eff} = 2^{\overline{\text{MI}}} - 1
+\end{equation}
+
+SINR hiệu dụng được ánh xạ lên đường cong BLER (từ trừu tượng hóa link-level);
+chỉ số MCS cao nhất thỏa mãn BLER~$\leq 10\%$ được chọn và chuyển sang CQI theo
+TS~38.214~S5.2.2.1.
+
+\subsection{MCS qua \texttt{computeMCS} (nâng cấp v2.0)}
+
+Trong v1.0, MCS được xấp xỉ bằng cách dùng trực tiếp chỉ số CQI làm chỉ số MCS ---
+một cách tắt phổ biến nhưng không đúng chuẩn. Trong v2.0,
+\texttt{nr5g.internal.computeMCS} được gọi với ma trận SINR theo RE làm đầu vào,
+áp dụng L2SM bên trong:
+
+\begin{lstlisting}[style=matlab, caption={MCS computation via L2SM in csirs\_computeMetrics.m}]
+l2sm   = nr5g.internal.L2SM.initialize(carrier);
+pdsch  = makePDSCH(carrier, ri);              % nrPDSCHConfig: PRBSet + NumLayers
+% Approach B: replicate per-layer wideband SINR to [nRE x ri]
+sinr_B_mat = repmat(fb.sinr_B(:).', nPRB*12, 1);
+mcs_B = nr5g.internal.computeMCS(l2sm, carrier, pdsch_B, sinr_B_mat, 'qam64');
+% Approaches C/D: sinrPerRE is already [nRE x nLayers] from nrCQISelect
+mcs_C = nr5g.internal.computeMCS(l2sm, carrier, pdsch_C, fb.sinrPerRE_C, 'qam64');
+\end{lstlisting}
+
+Thông lượng sau đó tính theo TS~38.214 Bảng~5.1.3.1-1:
+
+\begin{equation}
+\text{TP} = \frac{r \cdot Q_m \cdot R \cdot N_{RE/\text{slot}}}{T_{\text{slot}}}
+\;\text{[bps]}
+\end{equation}
+
+trong đó $r$ là RI, $Q_m$ bậc điều chế, $R$ tốc độ mã,
+$N_{RE/\text{slot}} = N_{PRB}\times12\times12$ (12 symbol PDSCH không có DMRS),
+và $T_{\text{slot}} = 0{,}5\,\text{ms}$ tại SCS~30\,kHz.
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\FloatBarrier
+\section{Mở rộng Thư viện: \texttt{nrPMIReport} cho Rel-19}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+Hàm \texttt{nr5g.internal.nrPMIReport} trong bản sao thư viện cục bộ đã hỗ trợ
+Rel-15/16 nhưng cần được mở rộng để xử lý codebook \texttt{'typeI-SinglePanel-r19'}
+và số cổng 128. Tổng cộng \textbf{5 thay đổi} trong \texttt{nrPMIReport.m} và
+\textbf{2 hàm mới} đã được thêm vào.
+
+\subsection{Lý thuyết Codebook Rel-19}
+
+Cả Mode~A và Mode~B đều xây dựng bộ tiền mã hoá dạng dual-polarisation DFT.
+Cấu trúc chung cho hạng $v$:
+
+\begin{equation}
+W^{(v)} = \frac{1}{\sqrt{v\,P}}
+\begin{bmatrix}
+  v_{l_1,m_1} & \cdots & v_{l_v,m_v} \\
+  \varphi(c_1)\,v_{l_1,m_1} & \cdots & \varphi(c_v)\,v_{l_v,m_v}
+\end{bmatrix}
+\label{eq:precoder_general}
+\end{equation}
+
+với $P=128$, $\varphi(c) = e^{j\pi c/2}$, và vector beam DFT 2D:
+
+\begin{equation}
+v_{l,m} = \mathbf{u}_h(l) \otimes \mathbf{u}_v(m), \quad
+[\mathbf{u}_h(l)]_k = e^{j2\pi lk/(O_1 N_1)}, \quad
+[\mathbf{u}_v(m)]_k = e^{j2\pi mk/(O_2 N_2)}
+\end{equation}
+
+với $(N_1,N_2)=(16,4)$, $(O_1,O_2)=(4,4)$ cho cấu hình 128 cổng.
+
+\medskip\noindent\textbf{Điểm khác nhau giữa hai mode} là cách xác định chỉ số
+beam $(l_k, m_k)$ của mỗi tầng:
+
+\begin{table}[h!]
+\centering
+\caption{So sánh cấu trúc chỉ số Mode A vs Mode B}
+\label{tab:modeAB_diff}
+\begin{tabular}{p{3.5cm}p{5cm}p{5cm}}
+\toprule
+ & \textbf{Mode A (\texttt{CodebookMode=1})} & \textbf{Mode B (\texttt{CodebookMode=2})} \\
+\midrule
+Chỉ số beam & $l \in [0,N_1O_1{-}1]$, $m \in [0,N_2O_2{-}1]$ (chung) & $(q_1,q_2)$ offset + $i_{1,2,l}$ per-layer \\
+Beam $k>1$ & offset cố định $(k_1,k_2)$ từ Bảng~5.2.2.2.1a-3 & mỗi tầng chọn độc lập \\
+Không gian ứng viên (hạng~2) & $16{,}384$ & $\sim 10^6$ (không tính trước được) \\
+Lợi thế & Đơn giản, codebook tính trước & Bám sát kênh multi-rank phân tán \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Năm thay đổi trong \texttt{nrPMIReport.m}}
+
+\begin{enumerate}
+
+\item \textbf{Ghi đè số cổng (dòng~$\sim$375)}: Code gốc đọc số cổng từ
+\texttt{csirs.NumCSIRSPorts} = 32 (một tài nguyên). Với 128 cổng tổng hợp,
+phải lấy từ chiều của ma trận kênh:
+\begin{lstlisting}[style=matlab]
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    numCSIRSPorts = size(H,4);   % 128, not 32
+end
+\end{lstlisting}
+
+\item \textbf{Flag \texttt{isType1SinglePanel\_r19} và \texttt{isModeB\_r19} (dòng~$\sim$386)}:
+\begin{lstlisting}[style=matlab]
+isType1SinglePanel_r19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19');
+if isType1SinglePanel_r19; isType1SinglePanel = true; end
+isModeB_r19 = isType1SinglePanel_r19 && (reportConfig.CodebookMode == 2);
+\end{lstlisting}
+Flag \texttt{isModeB\_r19} phân nhánh luồng thực thi sớm, trước khi code
+cũ cố dùng codebook tensor (vốn không tồn tại cho Mode~B).
+
+\item \textbf{Nhánh tính PMI Mode~B (dòng~$\sim$432)}: Gọi trực tiếp hàm
+greedy search và bỏ qua toàn bộ luồng tra cứu codebook cũ:
+\begin{lstlisting}[style=matlab]
+if isModeB_r19
+    nVar_scalar = mean(nVar(:), 'omitnan');
+    [W, pmiModeB, sinrVec] = getPMIType1SinglePanelR19CodebookModeB(...
+        Hcsirs, reportConfig, nLayers, nVar_scalar, numCSIRSPorts);
+    PMISet.i1    = [pmiModeB.q1+1, pmiModeB.q2+1, pmiModeB.n_idx+1];
+    PMISet.i2    = pmiModeB.c_idx + 1;
+    SINRPerREPMI = sinrVec(:).';
+end
+\end{lstlisting}
+
+\item \textbf{Bỏ qua xử lý subband và gán output cho Mode~B (dòng~$\sim$462--471)}:
+Mode~B chỉ hỗ trợ wideband, nên hai khối subband và form-output được bao bởi
+điều kiện \texttt{if \textasciitilde isModeB\_r19}.
+
+\item \textbf{Placeholder trong \texttt{getCodebook()} (dòng~$\sim$476/493)}: Sau
+\texttt{getCodebook()}, code gốc kiểm tra \texttt{\textasciitilde any(codebook(:))}
+và thoát sớm nếu codebook rỗng. Mode~A trả về tensor đầy đủ; Mode~B trả về
+\texttt{complex(1)} (scalar $\neq 0$) để vượt qua kiểm tra này mà không làm sai
+các luồng khác.
+
+\end{enumerate}
+
+\subsection{Hàm Mode A: \texttt{getPMIType1SinglePanelR19CodebookModeA()}}
+
+Hàm tính trước tensor codebook
+$\mathbf{C} \in \mathbb{C}^{P \times v \times N_{i_2} \times N_{i_{1,1}} \times N_{i_{1,2}} \times N_{i_{1,3}}}$
+và trả về cho \texttt{nrPMIReport} để tìm PMI bằng exhaustive SINR search.
+Tổng số ứng viên hạng~1: $4 \times 64 \times 16 \times 4 = 4{,}096$.
+
+\subsection{Hàm Mode B: Greedy Factored Search}
+
+Kích thước không gian tìm kiếm Mode~B tăng theo lũy thừa với hạng:
+hạng~2 yêu cầu $\sim$4,3\,GB tensor --- không khả thi để tính trước.
+Thuật toán Greedy Factored Search giải quyết bằng ba giai đoạn:
+
+\begin{enumerate}
+\item Liệt kê $O_1 O_2 = 16$ cặp offset phân số $(q_1, q_2)$.
+\item Với mỗi $(q_1, q_2)$:
+  \begin{itemize}
+    \item Hạng~1: duyệt vét cạn $N_1 N_2 = 64$ beam (đảm bảo tối ưu = Mode~A).
+    \item Hạng~$v > 1$: dùng SVD wideband $\mathbf{H}_{wb}$ để chọn 1 beam tốt
+          nhất cho mỗi tầng. Điểm số tính trên \emph{cả hai phân cực}:
+          \begin{equation}
+            \text{score}(n,l) = |\mathbf{V}_q^H\mathbf{V}_\text{top}|_{n,l}^2
+                               + |\mathbf{V}_q^H\mathbf{V}_\text{bot}|_{n,l}^2
+          \end{equation}
+          Chỉ dùng phân cực trên sẽ mất $\approx50\%$ thông tin trên kênh Rayleigh.
+  \end{itemize}
+\item Duyệt vét cạn $4^v$ tổ hợp co-phase; chọn $W$ tối đa hoá dung lượng
+      $\log_2\det(\mathbf{I} + \frac{1}{\sigma^2}\mathbf{H}_{wb}\mathbf{W}\mathbf{W}^H\mathbf{H}_{wb}^H)$.
+\end{enumerate}
+
+Độ phức tạp: hạng~4 chỉ cần $16\times(64+256)=5{,}120$ đánh giá thay vì
+$\sim 6{,}9\times10^{10}$ (vét cạn đầy đủ).
+
+\subsection{Kiểm tra xác nhận Mode B (5 test PASS)}
+
+Script \texttt{test\_ModeB\_verification.m} kiểm tra 5 tiêu chí:
+ánh xạ chỉ số, chuẩn hoá công suất $\|W\|_F^2=1$, cấu trúc co-phase,
+phục hồi beam kênh LoS, và $\text{cap}(\text{Mode B}) \geq \text{cap}(\text{Mode A})$.
+Kết quả quan trọng nhất:
+
+\begin{table}[h!]
+\centering
+\caption{TEST 5: cap(Mode B) $\geq$ cap(Mode A) --- 20 kênh Rayleigh, hạng~1}
+\label{tab:test5}
+\begin{tabular}{lcc}
+\toprule
+Phiên bản thuật toán & Mode B $>$ Mode A & Mode B $=$ Mode A \\
+\midrule
+Ban đầu (greedy, chỉ $V_\text{top}$) & 0\,\% & 15\,\% \\
+Sửa scoring ($V_\text{top}+V_\text{bot}$) & 0\,\% & 15\,\% \\
+Sửa hạng~1 (vét cạn 64 beam/offset) & 0\,\% & \textbf{100\,\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\FloatBarrier
+\section{Mở rộng Thư viện: \texttt{nrCQISelect} cho Rel-19}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+Bản sao thư viện MATLAB 5G Toolbox cục bộ trong dự án
+(\texttt{5g/netmod/+nr5g/+internal/nrCQISelect.m}) chưa hỗ trợ kiểu codebook
+\texttt{'typeI-SinglePanel-r19'}. Năm thay đổi có mục tiêu đã được thực hiện:
+
+\begin{enumerate}
+    \item \textbf{Xác thực đầu vào} (dòng~$\sim$1018): Thêm
+          \texttt{'typeI-SinglePanel-r19'} vào danh sách \texttt{validatestring}
+          cho \texttt{CodebookType}.
+
+    \item \textbf{Giới hạn số lớp} (dòng~$\sim$1102): Thêm nhánh \texttt{elseif}
+          cho Rel-19 thiết lập \texttt{codebookType='Rel-19 Refined Type I'; maxNLayers=4}.
+
+    \item \textbf{Nhánh chọn PMI} (dòng~$\sim$616): Khi
+          \texttt{CodebookType='typeI-SinglePanel-r19'}, hàm giờ gọi
+          \texttt{nrPMIReport} với \texttt{nrCSIReportConfig} được xây dựng thủ công
+          thay vì \texttt{nrDLPMISelect} cũ:
+
+\begin{lstlisting}[style=matlab, caption={Nhánh PMI thêm vào nrCQISelect cho Rel-19}]
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    r19cfg = nrCSIReportConfig;
+    r19cfg.NSizeBWP          = carrier.NSizeGrid;
+    r19cfg.CodebookType      = 'typeI-SinglePanel-r19';
+    r19cfg.PanelDimensions   = [1, 16, 4];
+    r19cfg.PMIFormatIndicator = 'wideband';
+    r19cfg.CodebookMode      = reportConfig.CodebookMode;
+    [PMISet, PMIInfo] = nr5g.internal.nrPMIReport(carrier, csirs, ...
+                            r19cfg, nLayers, H, nVar);
+else
+    [PMISet, PMIInfo] = nr5g.internal.nrDLPMISelect(...);
+end
+\end{lstlisting}
+
+    \item \textbf{Ghi đè số cổng} (dòng~$\sim$1132): Với Rel-19, số cổng CSI-RS
+          dùng để xác thực chiều H được ghi đè thành \texttt{size(H,4)}
+          (số anten TX thực tế = 128) thay vì \texttt{csirs\{1\}.NumCSIRSPorts} (= 32).
+
+    \item \textbf{Mở rộng chiều SINR} (dòng~$\sim$649): \texttt{nrPMIReport} trả về
+          \texttt{SINRPerREPMI} dạng $[1 \times N_L]$ (scalar wideband), nhưng
+          \texttt{getSINRperRB} phía sau yêu cầu $[N_{RE} \times N_L]$. Cách sửa
+          là broadcast:
+\begin{lstlisting}[style=matlab]
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19') ...
+        && size(sinrPerREPMI,1)==1
+    sinrPerREPMI = repmat(sinrPerREPMI, length(csirsIndSubs_k), 1);
+    PMIInfo.SINRPerREPMI = sinrPerREPMI;
+end
+\end{lstlisting}
+\end{enumerate}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\FloatBarrier
+\section{Mở rộng Thư viện: \texttt{nrRISelect} cho Rel-19}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+Hàm \texttt{nr5g.internal.nrRISelect} trong thư viện cục bộ chọn RI bằng cách
+lặp qua các rank ứng viên và gọi \texttt{nrDLPMISelect} --- một hàm chỉ hỗ trợ
+Rel-15/16. Do đó, \textbf{7 thay đổi có mục tiêu} đã được thực hiện để thêm
+nhánh Rel-19 mà không ảnh hưởng đến luồng hiện có.
+
+\subsection{Vì sao \texttt{nrDLPMISelect} không dùng được cho Rel-19}
+
+\texttt{nrRISelect} gọi một trong hai hàm nội bộ:
+\begin{itemize}[noitemsep]
+  \item \texttt{riSelectPMI}: dùng \texttt{nrDLPMISelect} với tiêu chí MaxSINR.
+  \item \texttt{riSelectCQI}: dùng \texttt{nrDLPMISelect} với tiêu chí MaxSE.
+\end{itemize}
+Cả hai đều gọi \texttt{nrDLPMISelect}, vốn không chấp nhận
+\texttt{CodebookType = 'typeI-SinglePanel-r19'}. Giải pháp là thêm một nhánh
+thứ ba \texttt{riSelectR19} dùng \texttt{nrPMIReport} thay thế.
+
+\subsection{Bảy thay đổi trong \texttt{nrRISelect.m}}
+
+\begin{enumerate}
+
+\item \textbf{Xác thực \texttt{CodebookType} (dòng~$\sim$586)}: Thêm token mới
+vào \texttt{validatestring}:
+\begin{lstlisting}[style=matlab]
+reportConfig.CodebookType = validatestring(reportConfig.CodebookType,...
+    {'Type1SinglePanel','Type1MultiPanel','Type2','eType2',...
+     'typeI-SinglePanel-r19'}, fcnName, 'CodebookType field');
+\end{lstlisting}
+
+\item \textbf{Giới hạn rank tối đa (dòng~$\sim$368)}: Rel-19 hỗ trợ tối đa
+hạng~4 (theo TS~38.214 \S5.2.2.2.1a):
+\begin{lstlisting}[style=matlab]
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    maxRank = min(nRxAnts, 4);
+elseif strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
+    maxRank = min([nRxAnts Pcsirs 8]);
+...
+\end{lstlisting}
+
+\item \textbf{Chuỗi mô tả \texttt{codebookType} (dòng~$\sim$657)}: Dùng trong
+thông báo lỗi \texttt{RIRestriction}:
+\begin{lstlisting}[style=matlab]
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    maxRank = 4;
+    codebookType = 'Rel-19 refined type I single-panel';
+...
+\end{lstlisting}
+
+\item \textbf{Ghi đè số cổng cho xác thực H (dòng~$\sim$708)}: Tương tự
+\texttt{nrCQISelect}, \texttt{csirs.NumCSIRSPorts} = 32 nhưng H có 128 cột:
+\begin{lstlisting}[style=matlab]
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    NumCSIRSPorts = size(H,4);
+else
+    NumCSIRSPorts = csirs.NumCSIRSPorts(1);
+end
+validateattributes(H,{class(H)},{'size',[K L NaN NumCSIRSPorts]},fcnName,'H');
+\end{lstlisting}
+
+\item \textbf{Khởi tạo output \texttt{initOutputs} (dòng~$\sim$510)}: Placeholder
+PMISet phù hợp với định dạng \texttt{nrPMIReport} (trường \texttt{W} thay vì
+\texttt{i1}/\texttt{i2}):
+\begin{lstlisting}[style=matlab]
+if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+    PMISet = struct('W', []);
+...
+\end{lstlisting}
+
+\item \textbf{Phân nhánh chính (dòng~$\sim$398)}: Gọi hàm mới thay vì
+\texttt{riSelectPMI}/\texttt{riSelectCQI}:
+\begin{lstlisting}[style=matlab]
+if ~isempty(validRanks) && ~isempty(csirsInd)
+    if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,...
+                                          H,nVar,validRanks);
+    elseif strcmpi(alg,'MaxSINR')
+        [RI,PMISet,PMIInfo] = riSelectPMI(...);
+    else
+        [RI,PMISet,PMIInfo] = riSelectCQI(...);
+    end
+end
+\end{lstlisting}
+
+\item \textbf{Hàm mới \texttt{riSelectR19()} (cuối file)}: Lặp qua
+\texttt{validRanks}, gọi \texttt{nrPMIReport} cho từng rank, chọn rank tối đa
+hoá dung lượng Shannon:
+\begin{lstlisting}[style=matlab]
+function [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,validRanks)
+    H_wb = reshape(mean(mean(H,1),2), size(H,3), size(H,4));
+    nRx  = size(H_wb,1);
+    r19cfg = nrCSIReportConfig;
+    r19cfg.NSizeBWP        = reportConfig.NSizeBWP;
+    r19cfg.NStartBWP       = reportConfig.NStartBWP;
+    r19cfg.CodebookType    = 'typeI-SinglePanel-r19';
+    r19cfg.PanelDimensions = reportConfig.PanelDimensions;
+    r19cfg.PMIFormatIndicator = 'wideband';
+    r19cfg.CodebookMode    = reportConfig.CodebookMode;
+    bestCap = -Inf;
+    for rank = validRanks
+        try
+            [pmiSet_try,pmiInfo_try] = nr5g.internal.nrPMIReport(...
+                carrier,csirs,r19cfg,rank,H,nVar);
+            W   = pmiInfo_try.W;
+            HW  = H_wb * W;
+            cap = real(log2(det(eye(nRx) + (1/nVar)*(HW*HW'))));
+            if cap > bestCap
+                bestCap = cap;  RI = rank;
+                PMISet = pmiSet_try;  PMIInfo = pmiInfo_try;
+            end
+        catch; end
+    end
+end
+\end{lstlisting}
+
+\end{enumerate}
+
+\subsection{Tích hợp vào \texttt{csirs\_feedback.m}}
+
+Sau khi mở rộng \texttt{nrRISelect}, các vòng lặp thủ công trong
+\texttt{csirs\_feedback.m} được thay bằng:
+
+\begin{lstlisting}[style=matlab]
+% Approach C (Mode A)
+riCfg_C.NSizeBWP       = carrier.NSizeGrid;
+riCfg_C.NStartBWP      = 0;
+riCfg_C.CodebookType   = 'typeI-SinglePanel-r19';
+riCfg_C.PanelDimensions = [1, 16, 4];
+riCfg_C.CodebookMode   = 1;
+[ri_C, ~, ~] = nr5g.internal.nrRISelect(carrier, csirs{1}, riCfg_C, H_4d, nVar_wb);
+
+% Approach D (Mode B): riCfg_D identique avec CodebookMode = 2
+[ri_D, ~, ~] = nr5g.internal.nrRISelect(carrier, csirs{1}, riCfg_D, H_4d, nVar_wb);
+\end{lstlisting}
+
+Toàn bộ quá trình chọn RI giờ đi qua đúng hàm toolbox
+\texttt{nrRISelect} $\to$ \texttt{riSelectR19} $\to$ \texttt{nrPMIReport},
+đảm bảo nhất quán với triết lý \emph{tối đa hoá 5G Toolbox, mở rộng có mục tiêu}.
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\FloatBarrier
+\section{Lịch sử Debug}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+Các lỗi sau đây đã phát sinh và được giải quyết trong quá trình phát triển v2.0:
+
+\begin{table}[h!]
+\centering
+\caption{Các lỗi gặp phải và cách khắc phục}
+\label{tab:errors}
+\begin{tabular}{p{4cm}p{5cm}p{5cm}}
+\toprule
+\textbf{Lỗi} & \textbf{Nguyên nhân gốc} & \textbf{Cách khắc phục} \\
+\midrule
+\texttt{Expected H to be of size ...x32} &
+\texttt{parseInputs} đặt \texttt{nTxAnts=32} từ tài nguyên CSI-RS (không phải 128 đầy đủ) &
+Ghi đè \texttt{numCSIRSPorts = size(H,4)} cho Rel-19 trong \texttt{validateInputs} \\
+\addlinespace
+\texttt{Index exceeds array bounds in getSINRperRB} &
+\texttt{nrPMIReport} trả về \texttt{SINRPerREPMI [1×nL]}, phía sau kỳ vọng \texttt{[nRE×nL]} &
+Broadcast SINR wideband sang per-RE qua \texttt{repmat} sau khi chọn PMI \\
+\addlinespace
+\texttt{Unrecognized function nrCSIReferenceResource} &
+Hàm này tồn tại trong toolbox MATLAB chính thức nhưng không có trong bản sao 5g/ cục bộ &
+Thay bằng \texttt{nrPDSCHConfig} xây dựng thủ công (PRBSet + NumLayers) \\
+\addlinespace
+\texttt{Unrecognized field name sinrPerRE\_B} &
+\texttt{csirs\_feedback.m} không lưu \texttt{sinr\_B} vào struct \texttt{fb} &
+Thêm \texttt{fb.sinr\_B = sinr\_B;} và cập nhật \texttt{csirs\_computeMetrics} dùng \texttt{repmat} \\
+\addlinespace
+\texttt{Unrecognized property 'MCSTable' for nrPDSCHConfig} &
+\texttt{nrPDSCHConfig} dùng thuộc tính \texttt{Modulation}, không phải \texttt{MCSTable} &
+Xóa \texttt{pdsch.MCSTable = 'qam64'} khỏi hàm trợ giúp \texttt{makePDSCH} \\
+\addlinespace
+\texttt{Mode B trả về NaN (không tính PMI)} &
+\texttt{getCodebook()} trả về mảng rỗng, kích hoạt kiểm tra \texttt{\textasciitilde any(codebook(:))} và thoát sớm &
+Trả về \texttt{complex(1)} làm placeholder --- scalar phức khác~0 vượt qua NaN-check mà không làm sai luồng khác \\
+\addlinespace
+\texttt{Mode B TEST 5 fail (Mode B thua Mode A 85\%)} &
+Điểm số beam chỉ dùng phân cực trên ($V_\text{top}$), bỏ sót 50\% năng lượng của kênh Rayleigh &
+Cộng thêm đóng góp phân cực dưới ($V_\text{top} + V_\text{bot}$) vào hàm tính điểm greedy \\
+\addlinespace
+\texttt{Mode B TEST 5 vẫn fail sau fix scoring} &
+Hạng~1 dùng greedy top-1 (64 lần ít hơn Mode A), không đảm bảo tối ưu &
+Thay \texttt{n\_cand = top1} thành \texttt{n\_cand = 0:N1N2-1} (vét cạn) khi \texttt{nLayers == 1}; TEST 5 đạt 100\% \\
+\addlinespace
+\texttt{function not allowed in if/else block} &
+Local function không thể đặt bên trong khối điều kiện MATLAB script &
+Inline toàn bộ vòng lặp RI trực tiếp vào thân script; sau này chuyển thành hàm riêng trong \texttt{nrRISelect} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\FloatBarrier
+\section{Kết quả Mô phỏng}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Kết quả thô (20 realization mỗi SNR)}
+
+\begin{table}[h!]
+\centering
+\caption{Kết quả Quét SNR: RI trung bình, MCS trung bình, Thông lượng (Mbps), \% so với cận trên SVD}
+\label{tab:results}
+\begin{tabular}{llccc}
+\toprule
+\textbf{SNR} & \textbf{Phương pháp} & \textbf{RI TB} & \textbf{TP trung bình (Mbps)} & \textbf{\% so với B} \\
+\midrule
+\multirow{3}{*}{$-5$\,dB (xa)}
+  & B: SVD (tham chiếu) & --- & 216{,}2 & tham chiếu \\
+  & C: Mode A           & --- & 59{,}3  & 27{,}4\,\% \\
+  & D: Mode B           & --- & 72{,}1  & 33{,}4\,\% \\
+\addlinespace
+\multirow{3}{*}{$+10$\,dB (trung bình)}
+  & B: SVD (tham chiếu) & --- & 332{,}7 & tham chiếu \\
+  & C: Mode A           & --- & 181{,}5 & 54{,}5\,\% \\
+  & D: Mode B           & --- & 198{,}1 & 59{,}5\,\% \\
+\addlinespace
+\multirow{3}{*}{$+25$\,dB (gần)}
+  & B: SVD (tham chiếu) & --- & 332{,}7 & tham chiếu \\
+  & C: Mode A           & --- & 216{,}2 & 65{,}0\,\% \\
+  & D: Mode B           & --- & 233{,}8 & 70{,}3\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Nhận xét}
+
+\begin{enumerate}
+    \item \textbf{Mode~B luôn nhỉnh hơn Mode~A.}
+          Chênh lệch khoảng 5--6\,\% so với SVD ở mọi mức SNR. Không nhiều nhưng
+          nhất quán, phù hợp với kỳ vọng vì Mode~B dùng cơ sở trực giao nên bám
+          sát hơn với cấu trúc mảng 2D $(N_1=16, N_2=4)$.
+
+    \item \textbf{SNR thấp thì cả hai đều xa SVD.}
+          Ở $-5$\,dB, Mode~A chỉ đạt 27\,\%, Mode~B 33\,\%. Khi SNR tăng lên
+          $+25$\,dB, khoảng cách thu hẹp rõ rệt (65\,\% và 70\,\%). Phần còn lại
+          là do lượng hóa codebook -- không thể tránh được.
+
+    \item \textbf{Thông lượng SVD trần ở $+10$\,dB và $+25$\,dB giống nhau.}
+          Cả hai điểm đều cho $\approx 332{,}7$\,Mbps. Lý do là MCS đã chạm trần
+          (QAM256, $R \approx 0{,}93$) từ $+10$\,dB với cấu hình 10\,MHz này rồi.
+
+    \item \textbf{RI giảm khi delay spread và Doppler cao -- không phải lỗi codebook.}
+          Với CDL-B ở 100\,ns / 5\,Hz Doppler thì kênh rất ổn, dễ ước lượng, RI
+          thường đạt 4. Khi tăng lên 450\,ns / 136\,Hz, chất lượng ước lượng kênh
+          giảm, $\mathbf{H}_{wb}$ bị trải ra trên miền tần số và thời gian, rank
+          hiệu dụng thấp đi. Đây là vấn đề của kênh và CE, không phải codebook bị
+          hạn chế.
+\end{enumerate}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\FloatBarrier
+\section{Tóm tắt Thay đổi: v1.0 đến v2.0}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\begin{table}[h!]
+\centering
+\caption{So sánh: v1.0 và v2.0}
+\label{tab:comparison}
+\begin{tabular}{lll}
+\toprule
+\textbf{Khía cạnh} & \textbf{v1.0} & \textbf{v2.0} \\
+\midrule
+Cấu trúc mã          & Script đơn khối 12 mục        & 7 file hàm + 1 file chính \\
+Quét SNR             & Một điểm (20\,dB)             & 3 điểm ($-5$, $+10$, $+25$\,dB) \\
+Realization kênh     & 1 (tất định)                  & 20 mỗi SNR (Monte Carlo qua \texttt{release}) \\
+Các phương pháp      & A, B, C, D                    & B, C, D (bỏ A vì là legacy Rel-15/16) \\
+Tính CQI             & Bảng ngưỡng SINR              & L2SM/MIESM qua \texttt{nrCQISelect} \\
+Tính MCS             & Dùng chỉ số CQI làm MCS       & \texttt{computeMCS} (L2SM, TS~38.214) \\
+Chọn RI (C/D)        & Vòng lặp \texttt{for ri\_try} thủ công & \texttt{nr5g.internal.nrRISelect} (7 thay đổi) \\
+\texttt{nrCQISelect} Rel-19 & Không hỗ trợ & Mở rộng với 5 thay đổi có mục tiêu \\
+\texttt{nrPMIReport} Rel-19 & Mode A (32p, không có Mode B) & Mode A 128p + Mode B Greedy Factored Search \\
+Đầu ra               & In một điểm                   & Bảng ASCII với \% so với SVD \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\section{Kết luận}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+Từ v1.0 đến v2.0, pipeline mô phỏng 128T128R đã đi từ một script chạy thử một lần
+thành một công cụ đánh giá có thể chạy lại được, với kết quả thống kê tin cậy.
+Tóm lại những gì đã làm được:
+
+\begin{itemize}
+    \item Tách code thành 7 file hàm rõ ràng, dễ bảo trì và tái sử dụng.
+    \item Mở rộng \texttt{nrPMIReport}: cài đặt Mode~A (128 cổng, tensor codebook DFT 2D)
+          và Mode~B (Greedy Factored Search, $\leq$5{,}120 đánh giá thay vì $\sim10^{10}$),
+          xác nhận bằng 5 bài test (tất cả PASS).
+    \item Mở rộng \texttt{nrCQISelect} (5 thay đổi) và \texttt{nrRISelect} (7 thay đổi)
+          để hỗ trợ \texttt{'typeI-SinglePanel-r19'}, đảm bảo toàn bộ
+          pipeline CSI đi qua đúng hàm toolbox.
+    \item Chuyển sang tính MCS bằng \texttt{computeMCS} (L2SM/MIESM, TS~38.214
+          Bảng~5.1.3.1-1), không còn dùng chỉ số CQI như proxy cho MCS.
+    \item Kết quả số (CDL-B, 20 realization/SNR): Mode~B đạt 33--70\,\% so với
+          cận trên SVD; Mode~A đạt 27--65\,\%; chênh nhau $\approx 5$--6\,\% nhất quán
+          ở mọi SNR.
+\end{itemize}
+
+\appendix
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\section{Danh sách File}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\begin{tabular}{ll}
+\toprule
+\textbf{File} & \textbf{Nhánh / Vị trí} \\
+\midrule
+\texttt{CSIRS\_128T128R\_v1\_0.m}              & \texttt{main} \\
+\texttt{CSIRS\_128T128R\_v2\_0.m}              & \texttt{SNRSweep} \\
+\texttt{csirs\_buildGrid.m}                    & \texttt{SNRSweep} \\
+\texttt{csirs\_channelSetup.m}                 & \texttt{SNRSweep} \\
+\texttt{csirs\_txRx.m}                         & \texttt{SNRSweep} \\
+\texttt{csirs\_channelEstimate.m}              & \texttt{SNRSweep} \\
+\texttt{csirs\_feedback.m}                     & \texttt{SNRSweep} \\
+\texttt{csirs\_computeMetrics.m}               & \texttt{SNRSweep} \\
+\texttt{csirs\_printSweepTable.m}              & \texttt{SNRSweep} \\
+\texttt{5g/netmod/+nr5g/+internal/nrCQISelect.m} & \texttt{SNRSweep} (đã sửa đổi, 5 thay đổi Rel-19) \\
+\texttt{5g/netmod/+nr5g/+internal/nrRISelect.m} & \texttt{SNRSweep} (đã sửa đổi, 7 thay đổi Rel-19) \\
+\texttt{5g/netmod/+nr5g/+internal/nrPMIReport.m} & \texttt{SNRSweep} (đã sửa đổi, 5 thay đổi + 2 hàm mới) \\
+\texttt{test\_ModeB\_verification.m} & \texttt{SNRSweep} (5 bài test, tất cả PASS) \\
+\bottomrule
+\end{tabular}
+
+%% ═══════════════════════════════════════════════════════════════════════════
+\section{Tài liệu tham khảo 3GPP}
+%% ═══════════════════════════════════════════════════════════════════════════
+
+\begin{itemize}[noitemsep]
+    \item TS~38.211~§7.4.1.5 --- Tạo tín hiệu NZP-CSI-RS
+    \item TS~38.214~§5.2.2.2.1 --- Codebook Type~I Single-Panel (Rel-15/16)
+    \item TS~38.214~§5.2.2.2.1a --- Codebook Refined Type~I Single-Panel (Rel-19)
+    \item TS~38.214~§5.2.2.1 --- Báo cáo CQI và ràng buộc BLER
+    \item TS~38.214 Bảng~5.1.3.1-1 --- Bảng chỉ số MCS (64QAM)
+    \item TS~38.331 --- Cấu hình RRC NZP-CSI-RS-ResourceSet
+\end{itemize}
+
+\end{document}

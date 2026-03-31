@@ -26,17 +26,17 @@ fprintf('%-14s', 'Approach');
 for i = 1:nSNR
     label = sprintf('SNR=%+ddB', snrList(i));
     switch snrList(i)
-        case num2cell(-10:4);  dist = '(xa)  ';
+        case num2cell(-10:4);  dist = '(far)  ';
         otherwise
             if snrList(i) <= 5
-                dist = '(xa)  ';
+                dist = '(far)  ';
             elseif snrList(i) <= 15
-                dist = '(tb)  ';
+                dist = '(med)  ';
             else
-                dist = '(gan) ';
+                dist = '(near)';
             end
     end
-    fprintf('  %-30s', sprintf('%s %s', label, dist));
+    fprintf('  %-40s', sprintf('%s %s', label, dist));
 end
 fprintf('\n');
 
