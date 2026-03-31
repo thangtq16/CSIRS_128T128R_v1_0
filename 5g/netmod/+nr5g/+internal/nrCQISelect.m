@@ -613,22 +613,9 @@ function [CQI,PMISet,CQIInfo,PMIInfo] = nrCQISelect(carrier,varargin)
         % Make the CSI-RS subscripts relative to BWP
         csirsIndSubs_k = csirsIndSubs_k - bwpStart*12;
         % Get the PMI and SINR values from the PMI selection function
-        if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
-            % Rel-19 Refined Type I Single-Panel (TS 38.214 S5.2.2.2.1a):
-            % nrDLPMISelect does not support this codebook type.
-            % Use nrPMIReport instead, then adapt its output to match the
-            % PMISet / PMIInfo structure expected by the rest of this function.
-            r19cfg                    = nrCSIReportConfig;
-            r19cfg.NSizeBWP           = reportConfig.NSizeBWP;
-            r19cfg.NStartBWP          = reportConfig.NStartBWP;
-            r19cfg.CodebookType       = 'typeI-SinglePanel-r19';
-            r19cfg.PanelDimensions    = reportConfig.PanelDimensions;
-            r19cfg.PMIFormatIndicator = 'wideband';
-            r19cfg.CodebookMode       = reportConfig.CodebookMode;
-            [PMISet, PMIInfo] = nr5g.internal.nrPMIReport(carrier, csirs, r19cfg, nLayers, H, nVar);
-        else
-            [PMISet,PMIInfo] = nr5g.internal.nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,nVar);
-        end
+        % ThangTQ23_128T128R_Rel19: nrDLPMISelect now supports 'typeI-SinglePanel-r19'
+        % — unified path for all codebook types, including Rel-19 subband PMI.
+        [PMISet,PMIInfo] = nr5g.internal.nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,nVar);
 
         if (isempty(csirsIndSubs_k) || (nVar == 0) || (all(isnan(PMISet.i1)) && all(isnan(PMISet.i2(:)))))
             if CQISubbandInfo.NumSubbands == 1

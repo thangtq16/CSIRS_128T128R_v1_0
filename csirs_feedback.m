@@ -44,12 +44,25 @@ nSC = carrier.NSizeGrid * 12;
 H_4d = repmat(reshape(H_wb, 1, 1, nRxAntennas, nTxAntennas), ...
               [nSC, carrier.SymbolsPerSlot, 1, 1]);
 
+% ── Subband size per TS 38.214 Table 5.2.1.4-2 (smallest valid value) ────
+nSizeBWP = carrier.NSizeGrid;
+if nSizeBWP >= 145
+    subbandSize = 16;
+elseif nSizeBWP >= 73
+    subbandSize = 8;
+elseif nSizeBWP >= 24
+    subbandSize = 4;
+else
+    subbandSize = [];   % BWP < 24 PRBs: no subbands
+end
+
 % ── Shared struct for nrCQISelect (Rel-19, now supported) ────────────────
 cqiCfg.NSizeBWP        = carrier.NSizeGrid;
 cqiCfg.NStartBWP       = 0;
 cqiCfg.CodebookType    = 'typeI-SinglePanel-r19';
 cqiCfg.PanelDimensions = [1, 16, 4];
-cqiCfg.PMIMode         = 'Wideband';
+cqiCfg.PMIMode         = 'Subband';
+cqiCfg.SubbandSize     = subbandSize;
 cqiCfg.CQIMode         = 'Wideband';
 cqiCfg.CQITable        = 'table1';
 
@@ -89,11 +102,13 @@ fb.sinr_B = sinr_B;   % [ri_B x 1] per-layer wideband ZF SINR (linear)
 %  RI: nrRISelect with typeI-SinglePanel-r19 (capacity maximisation)
 %  CQI: nrCQISelect (L2SM/MIESM) — now supports typeI-SinglePanel-r19
 % =========================================================================
-riCfg_C.NSizeBWP       = carrier.NSizeGrid;
-riCfg_C.NStartBWP      = 0;
-riCfg_C.CodebookType   = 'typeI-SinglePanel-r19';
+riCfg_C.NSizeBWP        = carrier.NSizeGrid;
+riCfg_C.NStartBWP       = 0;
+riCfg_C.CodebookType    = 'typeI-SinglePanel-r19';
 riCfg_C.PanelDimensions = [1, 16, 4];
-riCfg_C.CodebookMode   = 1;
+riCfg_C.CodebookMode    = 1;
+riCfg_C.PMIMode         = 'Subband';
+riCfg_C.SubbandSize     = subbandSize;
 [ri_C, ~, ~] = nr5g.internal.nrRISelect(carrier, csirs{1}, riCfg_C, H_4d, nVar_wb);
 
 cqiCfg_C             = cqiCfg;
@@ -101,7 +116,7 @@ cqiCfg_C.CodebookMode = 1;
 [cqi_C_vec, ~, ~, pmiInfo_C] = nr5g.internal.nrCQISelect( ...
     carrier, csirs{1}, cqiCfg_C, ri_C, H_4d, nVar_wb);
 cqi_C = cqi_C_vec(1);   % wideband CQI (row 1 = wideband)
-W_C   = pmiInfo_C.W;
+W_C   = pmiInfo_C.W(:,:,1);   % first subband precoder for wideband capacity approx
 cap_C = real(log2(det(eye(nRxAntennas) + ...
     (1/nVar_wb) * (H_wb*W_C*(H_wb*W_C)'))));
 
@@ -116,11 +131,13 @@ fb.sinrPerRE_C = pmiInfo_C.SINRPerREPMI;
 %  RI: nrRISelect with typeI-SinglePanel-r19 (capacity maximisation)
 %  CQI: nrCQISelect (L2SM/MIESM) — typeI-SinglePanel-r19
 % =========================================================================
-riCfg_D.NSizeBWP       = carrier.NSizeGrid;
-riCfg_D.NStartBWP      = 0;
-riCfg_D.CodebookType   = 'typeI-SinglePanel-r19';
+riCfg_D.NSizeBWP        = carrier.NSizeGrid;
+riCfg_D.NStartBWP       = 0;
+riCfg_D.CodebookType    = 'typeI-SinglePanel-r19';
 riCfg_D.PanelDimensions = [1, 16, 4];
-riCfg_D.CodebookMode   = 2;
+riCfg_D.CodebookMode    = 2;
+riCfg_D.PMIMode         = 'Subband';
+riCfg_D.SubbandSize     = subbandSize;
 [ri_D, ~, ~] = nr5g.internal.nrRISelect(carrier, csirs{1}, riCfg_D, H_4d, nVar_wb);
 
 cqiCfg_D             = cqiCfg;

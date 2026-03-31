@@ -733,10 +733,14 @@ end
 
 % ── Rel-19 RI selection via capacity maximization ────────────────────────────
 function [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,validRanks)
-%RISELECTR19  Select RI for typeI-SinglePanel-r19 using nrPMIReport + capacity.
+%RISELECTR19  Select RI for typeI-SinglePanel-r19 using nrDLPMISelect + capacity.
 %
-%  For each candidate rank in validRanks, call nrPMIReport to get the optimal
-%  Rel-19 precoder W, then evaluate the capacity:
+%  Routes through nrDLPMISelect (extended for Rel-19) so that subband PMI
+%  selection and the full Type I codebook path are used, consistent with
+%  the toolbox-first design principle.
+%
+%  For each candidate rank in validRanks, call nrDLPMISelect to get the
+%  optimal Rel-19 precoder W, then evaluate wideband capacity:
 %    cap = log2(det(I + (1/nVar)*H_wb*W*W'*H_wb'))
 %  The rank that maximises capacity is selected.
 
@@ -748,21 +752,23 @@ function [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,val
     H_wb = reshape(mean(mean(H,1),2), size(H,3), size(H,4));
     nRx  = size(H_wb,1);
 
-    % Build nrCSIReportConfig for nrPMIReport
-    r19cfg                    = nrCSIReportConfig;
-    r19cfg.NSizeBWP           = reportConfig.NSizeBWP;
-    r19cfg.NStartBWP          = reportConfig.NStartBWP;
-    r19cfg.CodebookType       = 'typeI-SinglePanel-r19';
-    r19cfg.PanelDimensions    = reportConfig.PanelDimensions;
-    r19cfg.PMIFormatIndicator = 'wideband';
-    r19cfg.CodebookMode       = reportConfig.CodebookMode;
+    % Build reportConfig struct for nrDLPMISelect (struct, not nrCSIReportConfig)
+    dlCfg.NSizeBWP    = reportConfig.NSizeBWP;
+    dlCfg.NStartBWP   = reportConfig.NStartBWP;
+    dlCfg.CodebookType = 'typeI-SinglePanel-r19';
+    dlCfg.PanelDimensions = reportConfig.PanelDimensions;
+    dlCfg.PMIMode     = reportConfig.PMIMode;
+    dlCfg.CodebookMode = reportConfig.CodebookMode;
+    if isfield(reportConfig,'SubbandSize') && ~isempty(reportConfig.SubbandSize)
+        dlCfg.SubbandSize = reportConfig.SubbandSize;
+    end
 
     bestCap = -Inf;
     for rank = validRanks
         try
-            [pmiSet_try, pmiInfo_try] = nr5g.internal.nrPMIReport( ...
-                carrier, csirs, r19cfg, rank, H, nVar);
-            W   = pmiInfo_try.W;
+            [pmiSet_try, pmiInfo_try] = nr5g.internal.nrDLPMISelect( ...
+                carrier, csirs, dlCfg, rank, H, nVar);
+            W   = pmiInfo_try.W(:,:,1);   % wideband (or first subband) precoder
             HW  = H_wb * W;
             cap = real(log2(det(eye(nRx) + (1/nVar) * (HW * HW'))));
             if cap > bestCap

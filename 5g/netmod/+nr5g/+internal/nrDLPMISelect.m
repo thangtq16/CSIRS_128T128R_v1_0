@@ -575,6 +575,7 @@ function [PMISet,info] = nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,vara
     isType1MultiPanel = strcmpi(reportConfig.CodebookType,'Type1MultiPanel');
     isType2 = strcmpi(reportConfig.CodebookType,'Type2');
     isEnhType2 = strcmpi(reportConfig.CodebookType,'eType2');
+    isTypeR19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19');
 
     % Get the codebook
     [codebook,indexSetSizes] = getCodebook(reportConfig,numCSIRSPorts,nLayers);
@@ -596,7 +597,7 @@ function [PMISet,info] = nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,vara
     % NaNs, or all the precoding matrices of the type I codebook are
     % restricted
     if isempty(csirsIndBWP_k) || all(isnan(H_bwp(:))) ||...
-        ((isType1SinglePanel || isType1MultiPanel) && (~any(codebook(:))))       
+        ((isType1SinglePanel || isType1MultiPanel || isTypeR19) && (~any(codebook(:))))
         PMISet = PMINaNSet;
         info = nanInfo;
         return;
@@ -630,7 +631,7 @@ function [PMISet,info] = nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,vara
     end
 
     % Form the output
-    if isType1SinglePanel || isType1MultiPanel  % Type I codebooks                      
+    if isType1SinglePanel || isType1MultiPanel || isTypeR19  % Type I codebooks
         SINRPerREOut = SINRPerRE;         % SINR value per RE for all the layers for all PMI indices
         codebookOut = codebook;           % PMI codebook containing the precoding matrices corresponding to all PMI indices
         % SINR value per subband for all the layers for all PMI indices
@@ -713,7 +714,7 @@ function [reportConfig,csirsInd,NumCSIRSPorts,nVar] = validateInputs(carrier,csi
 
     % Check for the presence of 'CodebookType' field
     if isfield(reportConfig,'CodebookType')
-        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2'},fcnName,'CodebookType field');
+        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2','typeI-SinglePanel-r19'},fcnName,'CodebookType field');
     else
         reportConfig.CodebookType = 'Type1SinglePanel';
     end
@@ -724,6 +725,7 @@ function [reportConfig,csirsInd,NumCSIRSPorts,nVar] = validateInputs(carrier,csi
     isType1MultiPanel = strcmpi(reportConfig.CodebookType,'Type1MultiPanel');
     isType2 = strcmpi(reportConfig.CodebookType,'Type2');
     isEnhType2 = strcmpi(reportConfig.CodebookType,'eType2');
+    isTypeR19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19');
 
     % Validate 'CodebookMode'
     if isfield(reportConfig,'CodebookMode')
@@ -739,6 +741,11 @@ function [reportConfig,csirsInd,NumCSIRSPorts,nVar] = validateInputs(carrier,csi
     O1 = 1;
     O2 = 1;
     NumCSIRSPorts = csirs.NumCSIRSPorts(1);
+    % ThangTQ23_128T128R_Rel19: for 128-port aggregated channel, H has 128 TX
+    % columns while csirs reports only 32 ports per resource → override
+    if isTypeR19
+        NumCSIRSPorts = size(H,4);
+    end
     if isType2
         codebookType = 'Type II';
         maxNLayers = 2;
@@ -748,11 +755,50 @@ function [reportConfig,csirsInd,NumCSIRSPorts,nVar] = validateInputs(carrier,csi
     elseif isType1SinglePanel
         codebookType = 'Type I Single-Panel';
         maxNLayers = 8;
+    elseif isTypeR19
+        codebookType = 'Type I Single-Panel Rel-19';
+        maxNLayers = 4;
     else
         codebookType = 'Type I Multi-Panel';
         maxNLayers = 4;
     end
-    if ~isType1MultiPanel
+    if isTypeR19
+        % ThangTQ23_128T128R_Rel19: 3-element PanelDimensions [Ng N1 N2]
+        % TS 38.214 Table 5.2.2.2.1a-2
+        if ~isfield(reportConfig,'PanelDimensions')
+            error('nr5g:nrDLPMISelect:PanelDimensionsMissing',...
+                'PanelDimensions field is mandatory.');
+        end
+        validateattributes(reportConfig.PanelDimensions,...
+            {'double','single'},{'vector','numel',3},fcnName,['PanelDimensions field for ' codebookType ' codebooks']);
+        Ng = reportConfig.PanelDimensions(1);
+        N1 = reportConfig.PanelDimensions(2);
+        N2 = reportConfig.PanelDimensions(3);
+        Pcsirs = 2*Ng*N1*N2;
+        if Pcsirs ~= NumCSIRSPorts
+            error('nr5g:nrDLPMISelect:InvalidPanelDimensions',...
+                ['For the configured number of CSI-RS ports (' num2str(NumCSIRSPorts)...
+                '), the given panel configuration [' num2str(Ng) ' ' num2str(N1) ' ' num2str(N2)...
+                '] is not valid. Two times the product of panel dimensions ('...
+                num2str(Pcsirs) ') must equal the number of CSI-RS ports (' num2str(NumCSIRSPorts) ').']);
+        end
+        % Rel-19 single-panel configurations (TS 38.214 Table 5.2.2.2.1a-2)
+        % Columns: Ng, N1, N2, O1, O2
+        panelConfigs = [1  1  1  2  4  4  8  8   8  12  16  16  % Ng
+                        2  4  4  8  8  8  8  8  16  16  16  16   % N1  (unused col 3 duplicate handled)
+                        1  1  2  1  2  4  2  4   1   2   2   4   % N2
+                        4  4  4  4  4  4  4  4   4   4   4   4   % O1
+                        1  1  4  1  4  4  4  4   1   4   4   4]; % O2
+        configIdx = find(panelConfigs(1,:) == Ng & panelConfigs(2,:) == N1 & panelConfigs(3,:) == N2,1);
+        if isempty(configIdx)
+            error('nr5g:nrDLPMISelect:InvalidPanelConfigurationR19',['The given panel configuration ['...
+                num2str(Ng) ' ' num2str(N1) ' ' num2str(N2) '] is not valid for typeI-SinglePanel-r19. '...
+                'For a number of CSI-RS ports, the panel configuration should '...
+                'be one of the possibilities from TS 38.214 Table 5.2.2.2.1a-2.']);
+        end
+        O1 = panelConfigs(4,configIdx);
+        O2 = panelConfigs(5,configIdx);
+    elseif ~isType1MultiPanel
         if NumCSIRSPorts > 2
             if ~isfield(reportConfig,'PanelDimensions')
                 error('nr5g:nrDLPMISelect:PanelDimensionsMissing',...
@@ -902,7 +948,7 @@ function [reportConfig,csirsInd,NumCSIRSPorts,nVar] = validateInputs(carrier,csi
     end
 
     % Validate 'CodebookSubsetRestriction'
-    if  isType1SinglePanel || isType1MultiPanel
+    if  isType1SinglePanel || isType1MultiPanel || isTypeR19
         if NumCSIRSPorts > 2
             codebookLength = N1*O1*N2*O2;
             codebookSubsetRestriction = ones(1,codebookLength);
@@ -948,7 +994,7 @@ function [reportConfig,csirsInd,NumCSIRSPorts,nVar] = validateInputs(carrier,csi
 
     % Validate 'i2Restriction'
     i2Restriction = ones(1,16);
-    if NumCSIRSPorts > 2 && isType1SinglePanel
+    if NumCSIRSPorts > 2 && (isType1SinglePanel || isTypeR19)
         if isfield(reportConfig,'i2Restriction') &&  ~isempty(reportConfig.i2Restriction)
             validateattributes(reportConfig.i2Restriction,...
                 {'numeric'},{'vector','binary','numel',16},fcnName,'i2Restriction field');
@@ -1120,6 +1166,12 @@ function [codebook,indexSetSizes] = getCodebook(reportConfig,numCSIRSPorts,nLaye
         [~,~,i2Length,i11Length,i12Length,i13Length] = size(codebook);
 
         % Store the sizes of the indices in a variable
+        indexSetSizes = [i2Length,i11Length,i12Length,i13Length];
+    elseif strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        % ThangTQ23_128T128R_Rel19: Rel-19 Mode A codebook
+        % Pcsirs-by-nLayers-by-i2Length-by-i11Length-by-i12Length-by-i13Length
+        codebook = getPMIType1SinglePanelR19Codebook(reportConfig,numCSIRSPorts,nLayers);
+        [~,~,i2Length,i11Length,i12Length,i13Length] = size(codebook);
         indexSetSizes = [i2Length,i11Length,i12Length,i13Length];
     elseif strcmpi(reportConfig.CodebookType,'Type1MultiPanel')
         % Codebook is a multidimensional matrix of size
@@ -2199,7 +2251,7 @@ function [PMISet,W,SINRPerREPMI,SubbandSINRs] = getTypeIPMISubband(carrier,repor
             i11_WB = PMISet.i1(1);
             i12_WB = PMISet.i1(2);
             i13_WB = PMISet.i1(3);
-            if strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
+            if strcmpi(reportConfig.CodebookType,'Type1SinglePanel') || strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
                 tempSubbandSINR = round(sum(SubbandSINRs(SubbandIdx,:,:,i11_WB,i12_WB,i13_WB),2),4,'decimals');
                 % Report i2 index corresponding to the maximum SINR for
                 % current subband
@@ -3257,5 +3309,135 @@ function SINRPerRE = computeSINRPerRE(Hcsirs,codebook,nVar,csirsIndBWP_k,indexSe
                 SINRPerRE(:,:,Indx) = nr5g.internal.nrPrecodedSINR(Hcsirs,nVar,codebook(:,:,Indx));
             end
         end
+    end
+end
+
+% =========================================================================
+% ThangTQ23_128T128R_Rel19
+% Type I Single-Panel Rel-19 Mode A codebook (TS 38.214 §5.2.2.2.1a)
+% Identical logic to getPMIType1SinglePanelR19CodebookModeA in nrPMIReport.m
+% but uses nrDLPMISelect field conventions:
+%   reportConfig.OverSamplingFactors  (not Tables.SinglePanelConfigurations)
+%   reportConfig.i2Restriction        (lowercase i)
+%   reportConfig.PanelDimensions      [Ng N1 N2]
+% =========================================================================
+function codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,nLayers)
+%   codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,nLayers)
+%   Returns the Type I Single-Panel Rel-19 Mode A codebook as defined in
+%   TS 38.214 Table 5.2.2.2.1a-4.
+%   Codebook size: Pcsirs x nLayers x i2Len x i11Len x i12Len x i13Len
+
+    codebookSubsetRestriction = reportConfig.CodebookSubsetRestriction;
+    i2Restriction             = reportConfig.i2Restriction;
+
+    N1 = reportConfig.PanelDimensions(2);
+    N2 = reportConfig.PanelDimensions(3);
+    O1 = reportConfig.OverSamplingFactors(1);
+    O2 = reportConfig.OverSamplingFactors(2);
+
+    phi = @(x) exp(1i*pi*x/2);
+
+    % Beam-pair offsets (Table 5.2.2.2.1a-3)
+    function [k1_vec, k2_vec, i13_len] = getBeamPairOffsets(N1_,N2_,O1_,O2_,nLyr)
+        if N2_ == 1
+            if N1_*O1_ >= 4
+                k1_vec = O1_*[1 2 3];  k2_vec = [0 0 0];  i13_len = 3;
+            else
+                k1_vec = O1_*1;        k2_vec = 0;         i13_len = 1;
+            end
+        else
+            k1_vec = [O1_  0    O1_  0   ];
+            k2_vec = [0    O2_  O2_  2*O2_];
+            i13_len = 4;
+        end
+        if nLyr == 1; i13_len = 1; k1_vec = 0; k2_vec = 0; end
+    end
+
+    [k1_vec, k2_vec, i13_len] = getBeamPairOffsets(N1,N2,O1,O2,nLayers);
+
+    switch nLayers
+        case 1
+            i11_len = N1*O1;  i12_len = N2*O2;  i2_len = 4;
+            codebook = zeros(Pcsirs,1,i2_len,i11_len,i12_len,1);
+            for i11 = 0:i11_len-1
+                for i12 = 0:i12_len-1
+                    vlm    = getVlm(N1,N2,O1,O2,i11,i12);
+                    bitIdx = N2*O2*i11 + i12;
+                    for i2 = 0:i2_len-1
+                        [lmR,i2R] = isRestricted(codebookSubsetRestriction,bitIdx,i2,i2Restriction);
+                        if ~(lmR||i2R)
+                            codebook(:,:,i2+1,i11+1,i12+1,1) = ...
+                                (1/sqrt(Pcsirs)) * [vlm; phi(i2)*vlm];
+                        end
+                    end
+                end
+            end
+
+        case 2
+            i11_len = N1*O1;  i12_len = N2*O2;  i2_len = 2;
+            codebook = zeros(Pcsirs,2,i2_len,i11_len,i12_len,i13_len);
+            for i11 = 0:i11_len-1
+                for i12 = 0:i12_len-1
+                    vlm    = getVlm(N1,N2,O1,O2,i11,i12);
+                    bitIdx = N2*O2*i11 + i12;
+                    for i13 = 0:i13_len-1
+                        lp = mod(i11 + k1_vec(i13+1), N1*O1);
+                        mp = mod(i12 + k2_vec(i13+1), N2*O2);
+                        vlp_mp = getVlm(N1,N2,O1,O2,lp,mp);
+                        for i2 = 0:i2_len-1
+                            [lmR,i2R] = isRestricted(codebookSubsetRestriction,bitIdx,i2,i2Restriction);
+                            if ~(lmR||i2R)
+                                pn = phi(i2);
+                                codebook(:,:,i2+1,i11+1,i12+1,i13+1) = ...
+                                    (1/sqrt(2*Pcsirs)) * ...
+                                    [vlm        vlp_mp;
+                                     pn*vlm  -pn*vlp_mp];
+                            end
+                        end
+                    end
+                end
+            end
+
+        case {3,4}
+            i11_len = N1*O1;  i12_len = N2*O2;  i2_len = 2;
+            codebook = zeros(Pcsirs,nLayers,i2_len,i11_len,i12_len,i13_len);
+            for i11 = 0:i11_len-1
+                for i12 = 0:i12_len-1
+                    vlm    = getVlm(N1,N2,O1,O2,i11,i12);
+                    bitIdx = N2*O2*i11 + i12;
+                    for i13 = 0:i13_len-1
+                        lp  = mod(i11 + k1_vec(i13+1),   N1*O1);
+                        mp  = mod(i12 + k2_vec(i13+1),   N2*O2);
+                        lpp = mod(i11 + 2*k1_vec(i13+1), N1*O1);
+                        mpp = mod(i12 + 2*k2_vec(i13+1), N2*O2);
+                        v1  = getVlm(N1,N2,O1,O2,lp, mp);
+                        v2  = getVlm(N1,N2,O1,O2,lpp,mpp);
+                        for i2 = 0:i2_len-1
+                            [lmR,i2R] = isRestricted(codebookSubsetRestriction,bitIdx,i2,i2Restriction);
+                            if ~(lmR||i2R)
+                                pn = phi(i2);
+                                if nLayers == 3
+                                    codebook(:,:,i2+1,i11+1,i12+1,i13+1) = ...
+                                        (1/sqrt(3*Pcsirs)) * ...
+                                        [vlm    v1    v2;
+                                         pn*vlm pn*v1 -pn*v2];
+                                else % nLayers==4
+                                    lp3 = mod(i11 + 3*k1_vec(i13+1), N1*O1);
+                                    mp3 = mod(i12 + 3*k2_vec(i13+1), N2*O2);
+                                    v3  = getVlm(N1,N2,O1,O2,lp3,mp3);
+                                    codebook(:,:,i2+1,i11+1,i12+1,i13+1) = ...
+                                        (1/sqrt(4*Pcsirs)) * ...
+                                        [vlm    v1    v2    v3;
+                                         pn*vlm pn*v1 pn*v2 pn*v3];
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+        otherwise
+            warning('typeI-SinglePanel-r19: ranks 5-8 not yet implemented, using rank-4.');
+            codebook = getPMIType1SinglePanelR19Codebook(reportConfig,Pcsirs,4);
     end
 end

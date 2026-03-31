@@ -577,58 +577,49 @@ các luồng khác.
 
 \subsection{Hàm Mode A: \texttt{getPMIType1SinglePanelR19CodebookModeA()}}
 
-Hàm tính trước tensor codebook
-$\mathbf{C} \in \mathbb{C}^{P \times v \times N_{i_2} \times N_{i_{1,1}} \times N_{i_{1,2}} \times N_{i_{1,3}}}$
-và trả về cho \texttt{nrPMIReport} để tìm PMI bằng exhaustive SINR search.
-Tổng số ứng viên hạng~1: $4 \times 64 \times 16 \times 4 = 4{,}096$.
+Mode~A dùng chiến lược \emph{tính trước codebook}. Toàn bộ bộ tiền mã hoá
+ứng viên được tạo ra một lần dưới dạng tensor 6 chiều, sau đó hàm tìm PMI
+chọn codeword cho SINR cao nhất bằng exhaustive search.
 
-\subsection{Hàm Mode B: Greedy Factored Search}
+Với $(N_1,N_2)=(16,4)$, $(O_1,O_2)=(4,4)$, số ứng viên ở hạng~1 là:
+$N_{i_2} \times N_{i_{1,1}} \times N_{i_{1,2}} \times N_{i_{1,3}} = 4 \times 64 \times 16 \times 4 = 4{,}096$.
+Kích thước tensor ở các hạng cao hơn vẫn khả thi vì ràng buộc beam cố định
+giữ không gian tìm kiếm tuyến tính theo số ứng viên offset $(k_1,k_2)$.
 
-Kích thước không gian tìm kiếm Mode~B tăng theo lũy thừa với hạng:
-hạng~2 yêu cầu $\sim$4,3\,GB tensor --- không khả thi để tính trước.
-Thuật toán Greedy Factored Search giải quyết bằng ba giai đoạn:
+\subsection{Hàm Mode B: Thuật toán Greedy Factored Search}
 
-\begin{enumerate}
-\item Liệt kê $O_1 O_2 = 16$ cặp offset phân số $(q_1, q_2)$.
-\item Với mỗi $(q_1, q_2)$:
-  \begin{itemize}
-    \item Hạng~1: duyệt vét cạn $N_1 N_2 = 64$ beam (đảm bảo tối ưu = Mode~A).
-    \item Hạng~$v > 1$: dùng SVD wideband $\mathbf{H}_{wb}$ để chọn 1 beam tốt
-          nhất cho mỗi tầng. Điểm số tính trên \emph{cả hai phân cực}:
-          \begin{equation}
-            \text{score}(n,l) = |\mathbf{V}_q^H\mathbf{V}_\text{top}|_{n,l}^2
-                               + |\mathbf{V}_q^H\mathbf{V}_\text{bot}|_{n,l}^2
-          \end{equation}
-          Chỉ dùng phân cực trên sẽ mất $\approx50\%$ thông tin trên kênh Rayleigh.
-  \end{itemize}
-\item Duyệt vét cạn $4^v$ tổ hợp co-phase; chọn $W$ tối đa hoá dung lượng
-      $\log_2\det(\mathbf{I} + \frac{1}{\sigma^2}\mathbf{H}_{wb}\mathbf{W}\mathbf{W}^H\mathbf{H}_{wb}^H)$.
-\end{enumerate}
+Mode~B cho phép mỗi tầng chọn beam DFT \emph{hoàn toàn độc lập}, điều này
+mang lại hiệu năng cao hơn trên kênh multi-rank có singular vectors phân tán,
+nhưng khiến không gian ứng viên tăng theo lũy thừa: hạng~2 yêu cầu $\sim$4,3\,GB
+tensor --- không khả thi để tính trước như Mode~A.
 
-Độ phức tạp: hạng~4 chỉ cần $16\times(64+256)=5{,}120$ đánh giá thay vì
-$\sim 6{,}9\times10^{10}$ (vét cạn đầy đủ).
+Giải pháp là thuật toán \textbf{Greedy Factored Search} chia bài toán thành
+hai lớp tối ưu hoá:
 
-\subsection{Kiểm tra xác nhận Mode B (5 test PASS)}
+\paragraph{Lớp 1 --- Chọn offset lưới DFT.}
+Mode~B sử dụng \emph{offset phân số} $(q_1, q_2)$ để xác định lưới con DFT
+cho cả slot. Có $O_1 \times O_2 = 16$ cặp offset. Thuật toán lặp qua cả 16 cặp.
 
-Script \texttt{test\_ModeB\_verification.m} kiểm tra 5 tiêu chí:
-ánh xạ chỉ số, chuẩn hoá công suất $\|W\|_F^2=1$, cấu trúc co-phase,
-phục hồi beam kênh LoS, và $\text{cap}(\text{Mode B}) \geq \text{cap}(\text{Mode A})$.
-Kết quả quan trọng nhất:
+\paragraph{Lớp 2 --- Chọn beam và co-phase.}
+Với mỗi offset đã chọn, beam tốt nhất cho từng tầng được xác định:
+\begin{itemize}[noitemsep]
+  \item Hạng~1: duyệt vét cạn cả $N_1 N_2 = 64$ beam trong lưới con
+        (đảm bảo tối ưu, bằng Mode~A).
+  \item Hạng~$v > 1$: dùng SVD của $\mathbf{H}_{wb}$ để chọn greedy 1 beam
+        tốt nhất cho mỗi tầng. Điểm số phải tính trên \emph{cả hai phân cực}:
+        \begin{equation}
+          \text{score}(n,l)
+          = \underbrace{|\mathbf{V}_q^H\mathbf{V}_\text{top}|_{n,l}^2}_{\text{phân cực trên}}
+          + \underbrace{|\mathbf{V}_q^H\mathbf{V}_\text{bot}|_{n,l}^2}_{\text{phân cực dưới}}
+        \end{equation}
+        Bỏ qua $\mathbf{V}_\text{bot}$ gây mất $\approx50\%$ thông tin trên kênh Rayleigh.
+\end{itemize}
+Sau khi có bộ beam, duyệt vét cạn $4^v$ tổ hợp co-phase và chọn $W$ tối đa hoá
+dung lượng Shannon.
 
-\begin{table}[h!]
-\centering
-\caption{TEST 5: cap(Mode B) $\geq$ cap(Mode A) --- 20 kênh Rayleigh, hạng~1}
-\label{tab:test5}
-\begin{tabular}{lcc}
-\toprule
-Phiên bản thuật toán & Mode B $>$ Mode A & Mode B $=$ Mode A \\
-\midrule
-Ban đầu (greedy, chỉ $V_\text{top}$) & 0\,\% & 15\,\% \\
-Sửa scoring ($V_\text{top}+V_\text{bot}$) & 0\,\% & 15\,\% \\
-Sửa hạng~1 (vét cạn 64 beam/offset) & 0\,\% & \textbf{100\,\%} \\
-\bottomrule
-\end{tabular}
-\end{table}
+\paragraph{Độ phức tạp.}
+Hạng~4: $16\times(64+256)=5{,}120$ đánh giá thay vì
+$\approx 6{,}9\times10^{10}$ (vét cạn toàn bộ).
 
 %% ═══════════════════════════════════════════════════════════════════════════
 \FloatBarrier
@@ -694,16 +685,55 @@ lặp qua các rank ứng viên và gọi \texttt{nrDLPMISelect} --- một hàm 
 Rel-15/16. Do đó, \textbf{7 thay đổi có mục tiêu} đã được thực hiện để thêm
 nhánh Rel-19 mà không ảnh hưởng đến luồng hiện có.
 
-\subsection{Vì sao \texttt{nrDLPMISelect} không dùng được cho Rel-19}
+\subsection{Tại sao nâng cấp tại \texttt{nrRISelect}, không phải \texttt{nrDLPMISelect}}
 
 \texttt{nrRISelect} gọi một trong hai hàm nội bộ:
 \begin{itemize}[noitemsep]
-  \item \texttt{riSelectPMI}: dùng \texttt{nrDLPMISelect} với tiêu chí MaxSINR.
-  \item \texttt{riSelectCQI}: dùng \texttt{nrDLPMISelect} với tiêu chí MaxSE.
+  \item \texttt{riSelectPMI}: tiêu chí MaxSINR --- gọi \texttt{nrDLPMISelect}, sau đó
+        index kết quả qua \texttt{PMIInfo.SINRPerSubband(idx,:,\,PMI.i2(idx),\,PMI.i1(1),\ldots)}.
+  \item \texttt{riSelectCQI}: tiêu chí MaxSE --- gọi \texttt{nrCQISelect}.
 \end{itemize}
-Cả hai đều gọi \texttt{nrDLPMISelect}, vốn không chấp nhận
-\texttt{CodebookType = 'typeI-SinglePanel-r19'}. Giải pháp là thêm một nhánh
-thứ ba \texttt{riSelectR19} dùng \texttt{nrPMIReport} thay thế.
+
+Câu hỏi tự nhiên đặt ra: \textbf{tại sao không mở rộng \texttt{nrDLPMISelect} theo
+triết lý nâng cấp toolbox?}
+
+Refined Codebook Rel-19 \emph{có} hỗ trợ subband (TS~38.214 \S5.2.2.2.1a quy định
+$i_2$ co-phase có thể báo cáo theo từng subband), nên lập luận ``Rel-19 không có
+subband'' là không chính xác. Vấn đề thực sự nằm ở \textbf{cấu trúc output
+không tương thích}: sau khi \texttt{nrDLPMISelect} trả về, \texttt{riSelectPMI}
+index thẳng vào tensor SINR bằng các chỉ số codebook Rel-15/16:
+\begin{lstlisting}[style=matlab]
+% riSelectPMI, dong ~439
+subbandSINRs(idx,:) = PMIInfo.SINRPerSubband(idx,:, ...
+    PMI.i2(idx), PMI.i1(1), PMI.i1(2), PMI.i1(3)) * rankIdx;
+\end{lstlisting}
+Rel-19 dùng cấu trúc chỉ số $[i_2,\,i_{1,1},\,i_{1,2},\,i_{1,3}]$ (Mode~A)
+hoặc $[q_1,\,q_2,\,n^{(1)},\ldots,n^{(v)},\,c^{(1)},\ldots,c^{(v)}]$ (Mode~B)
+--- không khớp với layout tensor Rel-15/16. Nếu mở rộng \texttt{nrDLPMISelect},
+nó buộc phải trả về các trường \texttt{i1}/\texttt{i2}/\texttt{SINRPerSubband}
+giả tạo, trong khi bên trong thực ra đang gọi \texttt{nrPMIReport} với tiêu chí
+capacity hoàn toàn khác. Đó là overhead vô nghĩa.
+
+Cách nâng cấp đúng tầng là tại \textbf{\texttt{nrRISelect}} --- hàm quyết định RI.
+\texttt{nrDLPMISelect} và \texttt{nrPMIReport} là hai implementation song song,
+mỗi cái phục vụ một thế hệ codebook:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Hàm} & \textbf{Vai trò} \\
+\midrule
+\texttt{nrDLPMISelect} & Sinh codebook + chọn PMI cho Rel-15/16 \\
+\texttt{nrPMIReport}   & Chọn PMI cho Rel-19 (128 cổng, Mode A/B) \\
+\texttt{nrRISelect}    & Điều phối RI --- gọi đúng hàm tuỳ theo codebook type \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Nhánh \texttt{riSelectR19} thêm vào \texttt{nrRISelect} chính là điểm nâng cấp
+đúng tầng: khi phát hiện Rel-19, route thẳng đến \texttt{nrPMIReport},
+bỏ qua \texttt{nrDLPMISelect} (giữ nguyên, không cần chạm vào).
+Luồng Rel-15/16 hoàn toàn không bị ảnh hưởng.
 
 \subsection{Bảy thay đổi trong \texttt{nrRISelect.m}}
 
