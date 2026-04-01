@@ -613,7 +613,22 @@ function [CQI,PMISet,CQIInfo,PMIInfo] = nrCQISelect(carrier,varargin)
         % Make the CSI-RS subscripts relative to BWP
         csirsIndSubs_k = csirsIndSubs_k - bwpStart*12;
         % Get the PMI and SINR values from the PMI selection function
-        [PMISet,PMIInfo] = nr5g.internal.nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,nVar);
+        % ThangTQ23_128T128R_Rel19: Mode A routes through nrDLPMISelect (subband-capable).
+        % Mode B routes through nrPMIReport (greedy factored search, wideband; Phase 2 = subband).
+        isModeB_r19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19') && ...
+                      isfield(reportConfig,'CodebookMode') && (reportConfig.CodebookMode == 2);
+        if isModeB_r19
+            r19cfg                    = nrCSIReportConfig;
+            r19cfg.NSizeBWP           = reportConfig.NSizeBWP;
+            r19cfg.NStartBWP          = reportConfig.NStartBWP;
+            r19cfg.CodebookType       = 'typeI-SinglePanel-r19';
+            r19cfg.PanelDimensions    = reportConfig.PanelDimensions;
+            r19cfg.PMIFormatIndicator = 'wideband';
+            r19cfg.CodebookMode       = reportConfig.CodebookMode;
+            [PMISet,PMIInfo] = nr5g.internal.nrPMIReport(carrier,csirs,r19cfg,nLayers,H,nVar);
+        else
+            [PMISet,PMIInfo] = nr5g.internal.nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,nVar);
+        end
 
         if (isempty(csirsIndSubs_k) || (nVar == 0) || (all(isnan(PMISet.i1)) && all(isnan(PMISet.i2(:)))))
             if CQISubbandInfo.NumSubbands == 1
@@ -632,6 +647,13 @@ function [CQI,PMISet,CQIInfo,PMIInfo] = nrCQISelect(carrier,varargin)
         end
 
         sinrPerREPMI = PMIInfo.SINRPerREPMI;
+        % For Rel-19: nrPMIReport returns wideband SINR [1 x nLayers].
+        % Replicate to [nRE x nLayers] so per-RE processing (getSINRperRB,
+        % getSubbandSINR, L2SM) works correctly downstream.
+        if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19') && size(sinrPerREPMI,1) == 1
+            sinrPerREPMI = repmat(sinrPerREPMI, length(csirsIndSubs_k), 1);
+            PMIInfo.SINRPerREPMI = sinrPerREPMI;
+        end
         if any(strcmpi(reportConfig.CodebookType,{'Type2','eType2'}))
             SINRperSubband = PMIInfo.SINRPerSubband;
             if strcmpi(reportConfig.CQIMode,'Subband') && strcmpi(reportConfig.PMIMode,'Wideband')
@@ -1015,7 +1037,7 @@ function [reportConfig,SINRTable,nVar] = validateInputs(carrier,reportConfig,nLa
 
     % Check for the presence of 'CodebookType' field
     if isfield(reportConfig,'CodebookType')
-        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2'},fcnName,'CodebookType field');
+        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2','typeI-SinglePanel-r19'},fcnName,'CodebookType field');
     else
         reportConfig.CodebookType = 'Type1SinglePanel';
     end
@@ -1102,6 +1124,9 @@ function [reportConfig,SINRTable,nVar] = validateInputs(carrier,reportConfig,nLa
     elseif strcmpi(reportConfig.CodebookType,'Type1SinglePanel')
         codebookType = 'Type I Single-Panel';
         maxNLayers = 8;
+    elseif strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        codebookType = 'Rel-19 Refined Type I Single-Panel';
+        maxNLayers = 4;   % TS 38.214 S5.2.2.2.1a: max 4 layers
     else
         codebookType = 'Type I Multi-Panel';
         maxNLayers = 4;
@@ -1118,6 +1143,12 @@ function [reportConfig,SINRTable,nVar] = validateInputs(carrier,reportConfig,nLa
             thirdDim = 1;
         else
             thirdDim = NaN;
+        end
+        % For Rel-19 Refined Type I, total ports = 2*Ng*N1*N2 from
+        % PanelDimensions — not from csirs (which covers 1 sub-array only).
+        % nrPMIReport handles its own H validation internally.
+        if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+            numCSIRSPorts = size(H,4);
         end
         validateattributes(H,{class(H)},{'size',[K L thirdDim numCSIRSPorts]},fcnName,'H');
         
