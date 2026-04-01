@@ -773,17 +773,25 @@ function [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,val
                     carrier, csirs, dlCfg, rank, H, nVar);
                 W = pmiInfo_try.W(:,:,1);   % first subband as wideband proxy
             else
-                % Mode B: nrPMIReport — greedy factored search (wideband)
+                % Mode B: nrPMIReport — greedy factored search.
+                % Beam group (i1) is always wideband per spec; co-phase (i2)
+                % follows reportConfig.PMIMode (wideband or subband, Phase 2).
                 r19cfg                    = nrCSIReportConfig;
                 r19cfg.NSizeBWP           = reportConfig.NSizeBWP;
                 r19cfg.NStartBWP          = reportConfig.NStartBWP;
                 r19cfg.CodebookType       = 'typeI-SinglePanel-r19';
                 r19cfg.PanelDimensions    = reportConfig.PanelDimensions;
-                r19cfg.PMIFormatIndicator = 'wideband';
                 r19cfg.CodebookMode       = reportConfig.CodebookMode;
+                if isfield(reportConfig,'PMIMode') && strcmpi(reportConfig.PMIMode,'Subband') ...
+                        && isfield(reportConfig,'SubbandSize') && ~isempty(reportConfig.SubbandSize)
+                    r19cfg.PMIFormatIndicator = 'subband';
+                    r19cfg.SubbandSize        = reportConfig.SubbandSize;
+                else
+                    r19cfg.PMIFormatIndicator = 'wideband';
+                end
                 [pmiSet_try, pmiInfo_try] = nr5g.internal.nrPMIReport( ...
                     carrier, csirs, r19cfg, rank, H, nVar);
-                W = pmiInfo_try.W;
+                W = pmiInfo_try.W(:,:,1);   % first subband as wideband proxy for capacity
             end
             HW  = H_wb * W;
             cap = real(log2(det(eye(nRx) + (1/nVar) * (HW * HW'))));

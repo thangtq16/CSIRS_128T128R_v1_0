@@ -34,8 +34,16 @@ carrier.CyclicPrefix      = 'normal';
 % Antennas
 nTxAntennas  = 128;
 nRxAntennas  = 4;
-gnbArraySize = [4, 16, 2, 1, 1];   % 4V x 16H x 2pol = 128 ports
-ueArraySize  = [1,  2, 2, 1, 1];   % 1V x  2H x 2pol =   4 ports
+gnbArraySize    = [4, 16, 2, 1, 1];   % 4V x 16H x 2pol = 128 ports
+ueArraySize     = [1,  2, 2, 1, 1];   % 1V x  2H x 2pol =   4 ports
+panelDimensions = [gnbArraySize(5), gnbArraySize(2), gnbArraySize(1)];  % [Ng, N1=Nh, N2=Nv] = [1,16,4]
+
+% PMI / CQI mode selection
+pmiMode = 'Subband';   % 'Subband' | 'Wideband'
+cqiMode = 'Wideband';  % 'Wideband' | 'Subband'
+%   Subband CQI: fb.cqi_C/D = [WB; SB1; SB2; ...] — finer granularity
+%   Note: Approach D PMI is always wideband (Mode B beam search constraint),
+%         but Approach D CQI follows cqiMode like Approach C.
 
 % Channel parameters
 channelCfg.DelayProfile        = 'CDL-B';   % near-uniform SV → rank diversity
@@ -91,7 +99,7 @@ for iSNR = 1:nSNR
             slotAssign, cdmLengths, nTxAntennas, nRxAntennas);
 
         % Section 10: CSI feedback (B / C / D)
-        fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign);
+        fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign, pmiMode, cqiMode, panelDimensions);
 
         % RI + MCS + Throughput
         m = csirs_computeMetrics(fb, carrier);

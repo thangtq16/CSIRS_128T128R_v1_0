@@ -1,0 +1,433 @@
+\documentclass[12pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+\usepackage{bm}
+\usepackage{bbm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\geometry{margin=2.5cm}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    breaklines=true,
+    numbers=left,
+    numberstyle=\tiny\color{gray}
+}
+
+\newcommand{\bH}{\mathbf{H}}
+\newcommand{\bW}{\mathbf{W}}
+\newcommand{\bv}{\mathbf{v}}
+\newcommand{\bI}{\mathbf{I}}
+\newcommand{\bV}{\mathbf{V}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\Z}{\mathbb{Z}}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\title{%
+    \textbf{Beam Group Selection (i\textsubscript{1}) for 3GPP Release~19\\
+    Type~I Single-Panel Mode~B Codebook}\\[0.5em]
+    \large Problem Formulation, Greedy Algorithm Analysis,\\
+    and Research Directions
+}
+\author{ThangTQ23 -- VSI}
+\date{April 2026}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% =============================================================================
+\section{Background and Motivation}
+% =============================================================================
+
+The 3GPP Release~19 specification (TS~38.214 Section~5.2.2.2.1a) introduces
+\emph{Refined Type~I Single-Panel} (RType-I-SP) codebook with two modes:
+
+\begin{itemize}
+    \item \textbf{Mode~A}: DFT-based codebook with pre-computed tensor.
+          Beam indices $i_1$ can be selected per-subband via exhaustive search
+          over the discrete DFT grid.
+    \item \textbf{Mode~B}: Factored codebook with a two-phase search.
+          The beam group index $i_1$ is \emph{constrained to be wideband}
+          by the specification; the co-phase index $i_2$ may be subband.
+\end{itemize}
+
+This report focuses on the problem of finding the optimal $i_1$ in \textbf{Mode~B}
+for a $128$-port massive MIMO system ($N_t = 128$, $N_r = 4$).
+
+% =============================================================================
+\section{Mode~B Codebook Structure}
+% =============================================================================
+
+\subsection{Two-Phase Factored Structure}
+
+The Mode~B precoding matrix $\bW \in \C^{N_t \times L}$ for $L$ layers is
+constructed as:
+
+\begin{equation}
+    \bW = \frac{1}{\sqrt{2 N_1 N_2}}
+    \begin{bmatrix}
+        \bv_{n_1}(q_1,q_2) & \cdots & \bv_{n_L}(q_1,q_2) \\[4pt]
+        e^{j\phi_{c_1}}\,\bv_{n_1}(q_1,q_2) & \cdots & e^{j\phi_{c_L}}\,\bv_{n_L}(q_1,q_2)
+    \end{bmatrix},
+    \label{eq:W_modeB}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $N_1$, $N_2$: number of horizontal and vertical antenna ports
+          per polarization ($N_1 = 16$, $N_2 = 4$ for the $128$-port config).
+    \item $\bv_n(q_1, q_2) \in \C^{N_1 N_2}$: the $n$-th DFT steering vector
+          on the 2D spatial grid defined by offsets $(q_1, q_2)$.
+    \item $O_1$, $O_2$: oversampling factors ($O_1 = O_2 = 4$).
+    \item $\phi_c = j^c$, $c \in \{0,1,2,3\}$: QPSK co-phase coefficient.
+    \item $e^{j\phi_{c_l}}$: dual-polarization co-phasing for layer $l$.
+\end{itemize}
+
+\subsection{Index Decomposition}
+
+The full PMI for Mode~B is decomposed into:
+
+\begin{equation}
+    \underbrace{i_1 = \{(q_1, q_2),\; n_1, n_2, \ldots, n_L\}}_{\text{wideband — Phase~1}}
+    \quad\text{and}\quad
+    \underbrace{i_2 = \{c_1, c_2, \ldots, c_L\}}_{\text{subband or wideband — Phase~2}}
+\end{equation}
+
+\begin{center}
+\begin{tabular}{llll}
+    \toprule
+    Index & Meaning & Granularity & Source \\
+    \midrule
+    $(q_1, q_2)$ & DFT grid offset (beam group) & \textbf{Wideband} & Spec constraint \\
+    $n_l$ & Beam index for layer $l$ & \textbf{Wideband} & Spec constraint \\
+    $c_l$ & Co-phase for layer $l$ & Subband or Wideband & Configurable \\
+    \bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Why is $i_1$ wideband?}
+The spatial direction of a beam (governed by $q_1, q_2, n_l$) does not vary
+across frequency subbands in typical propagation conditions. The specification
+explicitly mandates wideband $i_1$ to reduce feedback overhead. This is a
+\emph{standard constraint}, independent of how the search algorithm is implemented.
+
+% =============================================================================
+\section{Optimal i\textsubscript{1} Selection: Problem Formulation}
+% =============================================================================
+
+\subsection{Notation}
+
+\begin{align*}
+    \bH &\in \C^{N_r \times N_t} && \text{wideband channel matrix} \\
+    L   &\in \{1, 2, 3, 4\}     && \text{number of spatial layers (rank)} \\
+    \sigma^2 &> 0                && \text{noise variance} \\
+    \mathcal{I}_1 &= \Z_{O_1} \times \Z_{O_2} \times \Z_{N_1 N_2}^L && \text{search space for } i_1 \\
+    \mathcal{I}_2 &= \Z_4^L    && \text{search space for } i_2
+\end{align*}
+
+\subsection{Optimization Problem}
+
+\begin{equation}
+\boxed{
+    \max_{\substack{q_1 \in \Z_{O_1},\; q_2 \in \Z_{O_2} \\
+                    \mathbf{n} \in \Z_{N_1 N_2}^L,\; \mathbf{c} \in \Z_4^L}}
+    \;\log_2 \det\!\left(
+        \bI_{N_r} + \frac{1}{\sigma^2}\,
+        \bH\,\bW(q_1, q_2, \mathbf{n}, \mathbf{c})\,
+        \bW^H(q_1, q_2, \mathbf{n}, \mathbf{c})\,\bH^H
+    \right)
+}
+\label{eq:opt_problem}
+\end{equation}
+
+\subsection{Constraints}
+
+\begin{description}[leftmargin=1.5em]
+    \item[\textbf{C1} — Codebook membership:]
+    $\bW$ must belong to the Mode~B codebook:
+    \[
+        \bW \in \mathcal{W}_{\mathrm{ModeB}}(q_1, q_2, \mathbf{n}, \mathbf{c})
+    \]
+
+    \item[\textbf{C2} — Integer domain:]
+    \[
+        q_1 \in \Z_{O_1},\quad
+        q_2 \in \Z_{O_2},\quad
+        n_l \in \Z_{N_1 N_2},\quad
+        c_l \in \Z_4
+    \]
+
+    \item[\textbf{C3} — Column power normalization (automatic):]
+    \[
+        \|\mathbf{w}_l\|^2 = 1 \quad \forall\, l = 1,\ldots,L
+    \]
+
+    \item[\textbf{C4} — Wideband $i_1$ (spec constraint):]
+    $(q_1, q_2)$ and $\mathbf{n}$ are shared across all subbands.
+
+    \item[\textbf{C5} — Beam diversity (implicit):]
+    $n_l \neq n_{l'}$ for $l \neq l'$ is not mandated by the specification,
+    but in practice repeated beams cause $\bW$ to be rank-deficient,
+    collapsing capacity.
+\end{description}
+
+\subsection{Nature of the Problem}
+
+\begin{center}
+\begin{tabular}{ll}
+    \toprule
+    Property & Value \\
+    \midrule
+    Problem class & Integer combinatorial optimization \\
+    Objective & Non-convex (log-det over discrete variables) \\
+    Continuous relaxation & Not natural ($\mathbf{n}$, $\mathbf{c}$ are indices, not vectors) \\
+    Gradient w.r.t.\ variables & Does not exist \\
+    Exact solver & Exhaustive search (exponential complexity) \\
+    \bottomrule
+\end{tabular}
+\end{center}
+
+Although $\log\det(\bI + \frac{1}{\sigma^2}\bH\bW\bW^H\bH^H)$ is \emph{concave}
+in a continuous $\bW$, the feasible set here is a finite discrete codebook.
+Classical convex optimization and gradient-based methods cannot be applied directly.
+
+% =============================================================================
+\section{Current Implementation: Greedy Search}
+% =============================================================================
+
+\subsection{Algorithm Overview}
+
+The MathWorks implementation in \texttt{nr5g.internal.nrPMIReport} uses a
+greedy factored search. The algorithm decouples the joint search over
+$(q_1, q_2, \mathbf{n}, \mathbf{c})$ into sequential single-dimension searches.
+
+\begin{algorithm}[H]
+\caption{Greedy Search for i\textsubscript{1} — Mode B Rel-19}
+\begin{algorithmic}[1]
+\Require $\bH$, $\sigma^2$, $N_1$, $N_2$, $O_1$, $O_2$, $L$
+\Ensure $(q_1^*, q_2^*, \mathbf{n}^*, \mathbf{c}^*)$
+
+\State Compute wideband channel: $\bH_\mathrm{wb} \leftarrow \mathrm{mean}(\bH)$ over REs
+
+\For{each $(q_1, q_2) \in \Z_{O_1} \times \Z_{O_2}$}
+    \Comment{16 combinations — exhaustive}
+    \State Build DFT grid $\bV_{q_1,q_2} \in \C^{N_1 N_2 \times N_1 N_2}$
+
+    \If{$L = 1$}
+        \State $\mathbf{n}_\mathrm{cand} \leftarrow$ all $N_1 N_2$ beams \Comment{exhaustive for rank~1}
+    \Else
+        \State $[\bV_\mathrm{top}, \bV_\mathrm{bot}] \leftarrow$ top-$L$ right singular vectors of $\bH_\mathrm{wb}$
+        \For{$l = 1$ \textbf{to} $L$} \Comment{\textbf{greedy: independent per-layer}}
+            \State $\mathrm{score}_{n,l} \leftarrow \|\bV_{q_1,q_2}[:,n]^H \bV_\mathrm{top}[:,l]\|^2
+                                                   + \|\bV_{q_1,q_2}[:,n]^H \bV_\mathrm{bot}[:,l]\|^2$
+            \State $n_l \leftarrow \arg\max_n\; \mathrm{score}_{n,l}$
+        \EndFor
+        \State $\mathbf{n}_\mathrm{cand} \leftarrow \{n_1, \ldots, n_L\}$
+    \EndIf
+
+    \For{each $\mathbf{c} \in \Z_4^L$} \Comment{$4^L$ combinations — exhaustive}
+        \State Build $\bW(q_1, q_2, \mathbf{n}_\mathrm{cand}, \mathbf{c})$ via \eqref{eq:W_modeB}
+        \State Evaluate:
+        \[
+            C \leftarrow \log_2\det\!\left(\bI + \tfrac{1}{\sigma^2}\bH_\mathrm{wb}\bW\bW^H\bH_\mathrm{wb}^H\right)
+        \]
+        \State Update best $(q_1^*, q_2^*, \mathbf{n}^*, \mathbf{c}^*)$ if $C > C^*$
+    \EndFor
+\EndFor
+
+\State \textbf{Subband refinement:} fix $(q_1^*, q_2^*, \mathbf{n}^*)$,
+       re-optimize $\mathbf{c}$ per subband via exhaustive search over $\Z_4^L$
+
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Complexity Analysis}
+
+Table~\ref{tab:complexity} summarizes the number of capacity evaluations
+for the greedy algorithm versus true exhaustive search.
+
+\begin{table}[H]
+\centering
+\caption{Number of objective function evaluations: Greedy vs.\ Exhaustive}
+\label{tab:complexity}
+\begin{tabular}{ccccc}
+\toprule
+Rank $L$ & Greedy & Exhaustive & Ratio \\
+\midrule
+1 & $16 \times 64 \times 4 = 4{,}096$   & $4{,}096$              & $1\times$ (identical) \\
+2 & $16 \times 1 \times 16 = 256$        & $16 \times 64^2 \times 16 \approx 10^6$ & $\approx 4{,}096\times$ \\
+3 & $16 \times 1 \times 64 = 1{,}024$   & $16 \times 64^3 \times 64 \approx 2.7\times10^8$ & $\approx 2.6\times10^5\times$ \\
+4 & $16 \times 1 \times 256 = 4{,}096$  & $16 \times 64^4 \times 256 \approx 6.8\times10^{10}$ & $\approx 1.7\times10^7\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Observation:} For rank~1, the greedy algorithm is already exhaustive
+(no approximation). The suboptimality gap exists \emph{only for ranks~2--4}.
+
+\subsection{Sources of Suboptimality}
+
+The greedy algorithm introduces two approximations for $L \geq 2$:
+
+\paragraph{Approximation 1 — Surrogate objective (proxy metric):}
+Beam selection (Step~10--11 in Algorithm~1) uses SVD alignment score
+rather than the true capacity:
+\begin{equation}
+    \mathrm{score}_{n,l} = \|\bV_{q}[:,n]^H \bV_\mathrm{top}[:,l]\|^2
+                           + \|\bV_{q}[:,n]^H \bV_\mathrm{bot}[:,l]\|^2
+    \quad \neq \quad
+    \log_2\det(\cdots)
+\end{equation}
+The SVD alignment is a first-order proxy that ignores inter-layer interactions.
+Co-phase $\mathbf{c}$ is optimized later using the true metric, but by then beams $\mathbf{n}$ are already fixed.
+
+\paragraph{Approximation 2 — Independent per-layer beam selection:}
+Each layer selects its beam independently:
+\begin{equation}
+    n_l^* = \arg\max_n \mathrm{score}_{n,l}, \quad l = 1, \ldots, L
+\end{equation}
+This ignores spatial correlation between layers. In practice, multiple layers
+may independently rank the same beam highest ($n_1 = n_2 = \cdots$), leading
+to a near-rank-deficient $\bW$ and degraded capacity. The optimal solution
+may require selecting \emph{diverse} beams across layers.
+
+% =============================================================================
+\section{Research Directions}
+% =============================================================================
+
+\subsection{Key Open Question}
+
+\begin{center}
+\textit{How large is the capacity gap between the greedy $i_1$ and the globally
+optimal $i_1$ in a 128-port Mode~B system?}
+\end{center}
+
+This question must be answered empirically before any algorithmic improvement
+can be claimed. The proposed experiment:
+
+\begin{enumerate}
+    \item Run \textbf{exhaustive search} offline for rank~$L=2$ (manageable: $\sim10^6$ evaluations).
+    \item Compare: exhaustive vs.\ greedy vs.\ random beam selection.
+    \item Measure gap in: average capacity (bits/s/Hz), CQI distribution.
+    \item If gap $> 0.5$~dB SINR equivalent $\Rightarrow$ strong motivation for improvement.
+    \item If gap $\approx 0$ $\Rightarrow$ contribution shifts to \emph{complexity reduction}
+          with equal quality, which is still publishable.
+\end{enumerate}
+
+\subsection{Candidate Approaches to Replace Greedy}
+
+\begin{center}
+\begin{tabular}{lp{6cm}p{4cm}}
+\toprule
+Approach & Idea & Comment \\
+\midrule
+Exhaustive (offline) & Enumerate all combinations; used as ground truth for labeling & Not real-time feasible at rank~4 \\
+Branch \& Bound & Prune branches where upper bound $<$ best found & Can be optimal with speedup \\
+NN Classifier & Learn $\bH \mapsto (q_1, q_2, \mathbf{n})$ from exhaustive-labeled data & Fast inference; potential novelty for Rel-19 \\
+Hybrid & NN selects $(q_1, q_2)$; analytical/exhaustive refines $\mathbf{n}$ & Reduced search space \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Neural Network Formulation}
+
+If a NN approach is pursued, the classification problem is:
+
+\begin{align}
+    \text{Input:} \quad   & \bR = \bH^H\bH \in \C^{N_t \times N_t}
+                            \quad \text{(or top-}k\text{ eigenvectors)} \\
+    \text{Output:} \quad  & \hat{i}_1 = (\hat{q}_1, \hat{q}_2, \hat{n}_1, \ldots, \hat{n}_L) \\
+    \text{Training label:} & i_1^* \text{ from exhaustive search (offline)} \\
+    \text{Loss:} \quad    & \text{Cross-entropy or capacity-aware loss}
+\end{align}
+
+\paragraph{Key claims to validate:}
+\begin{itemize}
+    \item \textbf{Quality}: $C(\hat{i}_1) \geq C(i_1^\mathrm{greedy})$ on average.
+    \item \textbf{Complexity}: NN inference FLOPs $\ll$ greedy search FLOPs.
+    \item \textbf{Generalization}: performance maintained across CDL-A/B/C/D channel models.
+\end{itemize}
+
+\subsection{Potential Contribution for a Conference Paper}
+
+\begin{itemize}
+    \item \textbf{Novelty}: Rel-19 Mode~B is a 2024 specification; few published works
+          target this codebook at 128-port scale.
+    \item \textbf{Scope}: Focused on $i_1$ only — avoids the saturated end-to-end beamforming NN literature.
+    \item \textbf{Baselines required}: greedy (current), exhaustive (upper bound), proposed method.
+    \item \textbf{Suitable venues}: IEEE ICC, GLOBECOM, VTC, WCNC.
+    \item \textbf{Prerequisite}: Survey 2022--2025 papers on DL-based PMI/beam selection
+          for massive MIMO to confirm the Rel-19 Mode~B gap in the literature.
+\end{itemize}
+
+% =============================================================================
+\section{System Configuration (Simulation Reference)}
+% =============================================================================
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Carrier bandwidth & 52 PRBs, SCS 30~kHz (10~MHz) \\
+Carrier frequency & 4.9~GHz \\
+gNB antenna & $4V \times 16H \times 2\text{pol} = 128$ ports \\
+UE antenna & $1V \times 2H \times 2\text{pol} = 4$ ports \\
+Channel model & CDL-B, DS = 100~ns, $f_D = 5$~Hz \\
+Panel dimensions & $[N_g, N_1, N_2] = [1, 16, 4]$ \\
+Oversampling & $O_1 = O_2 = 4$ \\
+PMI mode & Subband $i_2$ (wideband $i_1$ per spec) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =============================================================================
+\appendix
+\section{Glossary}
+% =============================================================================
+
+\begin{description}
+    \item[DFT steering vector] $\bv_n(q_1,q_2)$: 2D spatial DFT basis vector
+        evaluated at beam index $n$ with grid offset $(q_1, q_2)$.
+    \item[Greedy search] An optimization strategy that makes the locally optimal
+        choice at each step without backtracking or considering global consequences.
+    \item[i\textsubscript{1}] Wideband beam group index in Type~I codebook;
+        encodes spatial direction.
+    \item[i\textsubscript{2}] Co-phase index; may be subband or wideband.
+    \item[Mode~A] Type~I SP Rel-19 mode using pre-computed DFT tensor;
+        allows subband $i_1$.
+    \item[Mode~B] Type~I SP Rel-19 mode using factored greedy search;
+        $i_1$ must be wideband (spec constraint).
+    \item[RType-I-SP] Refined Type~I Single-Panel codebook, introduced in Rel-19
+        (TS~38.214 S5.2.2.2.1a).
+    \item[SVD alignment] Proxy metric: inner product between a candidate beam vector
+        and the dominant right singular vectors of $\bH$.
+\end{description}
+
+\end{document}

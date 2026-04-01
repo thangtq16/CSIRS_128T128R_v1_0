@@ -1,4 +1,4 @@
-function fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign)
+function fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign, pmiMode, cqiMode, panelDimensions)
 %CSIRS_FEEDBACK  CSI feedback (RI/PMI/CQI/Cap) for Approaches B, C, D.
 %
 %  Approach B: Full 128-port SVD upper bound (ideal reference)
@@ -14,22 +14,45 @@ function fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign)
 %    H_est_full   - [K x 28 x nRx x 128] estimated channel
 %    nVar_all     - [1x4] noise variance per resource
 %    slotAssign   - [1x4] slot index per resource
+%    pmiMode      - (optional) 'Subband' (default) or 'Wideband'
+%    cqiMode      - (optional) 'Wideband' (default) or 'Subband'
+%                   When 'Subband': fb.cqi_C/D are vectors [1+numSB x 1]
+%                   Row 1 = wideband CQI, rows 2..end = per-subband CQI
 %
 %  Output:
 %    fb - struct:
 %           .ri_B,  .cqi_B,  .cap_B,  .W_B
 %           .ri_C,  .cqi_C,  .cap_C,  .W_C,  .sinrPerRE_C
 %           .ri_D,  .cqi_D,  .cap_D,  .W_D,  .sinrPerRE_D
-%         cqi_* is wideband scalar; cap_* is scalar (bits/s/Hz)
+%         cqi_C/D: wideband scalar (CQIMode='Wideband')
+%                  or [1+numSB x 1] vector (CQIMode='Subband'),
+%                  row 1 = wideband, rows 2..end = per-subband
+%                  Note: Mode D beam is always wideband (spec constraint),
+%                  but per-subband CQI with that beam is still valid.
+
+if nargin < 6 || isempty(pmiMode)
+    pmiMode = 'Subband';
+end
+pmiMode = validatestring(pmiMode, {'Subband','Wideband'});
+
+if nargin < 7 || isempty(cqiMode)
+    cqiMode = 'Wideband';
+end
+cqiMode = validatestring(cqiMode, {'Wideband','Subband'});
 
 nRxAntennas  = size(H_est_full, 3);
 nTxAntennas  = size(H_est_full, 4);
-nPortsPerRes = nTxAntennas / 4;
+nResources   = length(csirs);
+nPortsPerRes = nTxAntennas / nResources;
+
+if nargin < 8 || isempty(panelDimensions)
+    panelDimensions = [1, 16, 4];   % fallback: [Ng, N1=Nh, N2=Nv]
+end
 nSymPerSlot  = carrier.SymbolsPerSlot;
 
 % ── Wideband channel matrix H_wb [nRx x nTx] ─────────────────────────────
 H_wb = zeros(nRxAntennas, nTxAntennas);
-for r = 1:4
+for r = 1:nResources
     pS = (r-1)*nPortsPerRes + 1;  pE = r*nPortsPerRes;
     sS = slotAssign(r)*nSymPerSlot + 1;
     sE = (slotAssign(r)+1)*nSymPerSlot;
@@ -60,10 +83,10 @@ end
 cqiCfg.NSizeBWP        = carrier.NSizeGrid;
 cqiCfg.NStartBWP       = 0;
 cqiCfg.CodebookType    = 'typeI-SinglePanel-r19';
-cqiCfg.PanelDimensions = [1, 16, 4];
-cqiCfg.PMIMode         = 'Subband';
+cqiCfg.PanelDimensions = panelDimensions;
+cqiCfg.PMIMode         = pmiMode;
 cqiCfg.SubbandSize     = subbandSize;
-cqiCfg.CQIMode         = 'Wideband';
+cqiCfg.CQIMode         = cqiMode;
 cqiCfg.CQITable        = 'table1';
 
 % =========================================================================
@@ -105,9 +128,9 @@ fb.sinr_B = sinr_B;   % [ri_B x 1] per-layer wideband ZF SINR (linear)
 riCfg_C.NSizeBWP        = carrier.NSizeGrid;
 riCfg_C.NStartBWP       = 0;
 riCfg_C.CodebookType    = 'typeI-SinglePanel-r19';
-riCfg_C.PanelDimensions = [1, 16, 4];
+riCfg_C.PanelDimensions = panelDimensions;
 riCfg_C.CodebookMode    = 1;
-riCfg_C.PMIMode         = 'Subband';
+riCfg_C.PMIMode         = pmiMode;
 riCfg_C.SubbandSize     = subbandSize;
 [ri_C, ~, ~] = nr5g.internal.nrRISelect(carrier, csirs{1}, riCfg_C, H_4d, nVar_wb);
 
@@ -115,7 +138,12 @@ cqiCfg_C             = cqiCfg;
 cqiCfg_C.CodebookMode = 1;
 [cqi_C_vec, ~, ~, pmiInfo_C] = nr5g.internal.nrCQISelect( ...
     carrier, csirs{1}, cqiCfg_C, ri_C, H_4d, nVar_wb);
-cqi_C = cqi_C_vec(1);   % wideband CQI (row 1 = wideband)
+% cqi_C_vec: row 1 = wideband, rows 2..end = per-subband (when CQIMode='Subband')
+if strcmpi(cqiMode, 'Subband')
+    cqi_C = cqi_C_vec;   % full vector [1+numSB x 1]
+else
+    cqi_C = cqi_C_vec(1);
+end
 W_C   = pmiInfo_C.W(:,:,1);   % first subband precoder for wideband capacity approx
 cap_C = real(log2(det(eye(nRxAntennas) + ...
     (1/nVar_wb) * (H_wb*W_C*(H_wb*W_C)'))));
@@ -134,18 +162,26 @@ fb.sinrPerRE_C = pmiInfo_C.SINRPerREPMI;
 riCfg_D.NSizeBWP        = carrier.NSizeGrid;
 riCfg_D.NStartBWP       = 0;
 riCfg_D.CodebookType    = 'typeI-SinglePanel-r19';
-riCfg_D.PanelDimensions = [1, 16, 4];
+riCfg_D.PanelDimensions = panelDimensions;
 riCfg_D.CodebookMode    = 2;
-riCfg_D.PMIMode         = 'Subband';
+riCfg_D.PMIMode         = pmiMode;
 riCfg_D.SubbandSize     = subbandSize;
 [ri_D, ~, ~] = nr5g.internal.nrRISelect(carrier, csirs{1}, riCfg_D, H_4d, nVar_wb);
 
 cqiCfg_D             = cqiCfg;
 cqiCfg_D.CodebookMode = 2;
-cqiCfg_D.PMIMode      = 'Wideband';   % Mode B uses nrPMIReport (wideband-only)
+% Mode B beam group (i1) is always wideband (spec constraint).
+% Co-phase (i2) follows pmiMode: 'Subband' activates Phase 2 per-subband
+% co-phase in nrPMIReport, giving consistent W between RI and CQI steps.
+cqiCfg_D.PMIMode      = pmiMode;
 [cqi_D_vec, ~, ~, pmiInfo_D] = nr5g.internal.nrCQISelect( ...
     carrier, csirs{1}, cqiCfg_D, ri_D, H_4d, nVar_wb);
-cqi_D = cqi_D_vec(1);
+% cqi_D_vec: row 1 = wideband, rows 2..end = per-subband (when CQIMode='Subband')
+if strcmpi(cqiMode, 'Subband')
+    cqi_D = cqi_D_vec;   % full vector [1+numSB x 1]
+else
+    cqi_D = cqi_D_vec(1);
+end
 W_D   = pmiInfo_D.W(:,:,1);   % first subband precoder for wideband capacity approx
 cap_D = real(log2(det(eye(nRxAntennas) + ...
     (1/nVar_wb) * (H_wb*W_D*(H_wb*W_D)'))));

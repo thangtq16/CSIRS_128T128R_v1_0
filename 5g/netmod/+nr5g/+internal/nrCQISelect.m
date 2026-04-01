@@ -618,13 +618,20 @@ function [CQI,PMISet,CQIInfo,PMIInfo] = nrCQISelect(carrier,varargin)
         isModeB_r19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19') && ...
                       isfield(reportConfig,'CodebookMode') && (reportConfig.CodebookMode == 2);
         if isModeB_r19
-            r19cfg                    = nrCSIReportConfig;
-            r19cfg.NSizeBWP           = reportConfig.NSizeBWP;
-            r19cfg.NStartBWP          = reportConfig.NStartBWP;
-            r19cfg.CodebookType       = 'typeI-SinglePanel-r19';
-            r19cfg.PanelDimensions    = reportConfig.PanelDimensions;
-            r19cfg.PMIFormatIndicator = 'wideband';
-            r19cfg.CodebookMode       = reportConfig.CodebookMode;
+            r19cfg                 = nrCSIReportConfig;
+            r19cfg.NSizeBWP        = reportConfig.NSizeBWP;
+            r19cfg.NStartBWP       = reportConfig.NStartBWP;
+            r19cfg.CodebookType    = 'typeI-SinglePanel-r19';
+            r19cfg.PanelDimensions = reportConfig.PanelDimensions;
+            r19cfg.CodebookMode    = reportConfig.CodebookMode;
+            % Beam group (i1) is always wideband; co-phase (i2) follows PMIMode.
+            if isfield(reportConfig,'PMIMode') && strcmpi(reportConfig.PMIMode,'Subband') ...
+                    && isfield(reportConfig,'SubbandSize') && ~isempty(reportConfig.SubbandSize)
+                r19cfg.PMIFormatIndicator = 'subband';
+                r19cfg.SubbandSize        = reportConfig.SubbandSize;
+            else
+                r19cfg.PMIFormatIndicator = 'wideband';
+            end
             [PMISet,PMIInfo] = nr5g.internal.nrPMIReport(carrier,csirs,r19cfg,nLayers,H,nVar);
         else
             [PMISet,PMIInfo] = nr5g.internal.nrDLPMISelect(carrier,csirs,reportConfig,nLayers,H,nVar);
@@ -736,12 +743,15 @@ function [CQI,PMISet,CQIInfo,PMIInfo] = nrCQISelect(carrier,varargin)
                 % Deduce the SINR values for the CQI computation based on the
                 % CQI mode, as the SINRPerSubband field in the PMI information
                 % output has the SINR values according to the PMIMode
-                if strcmpi(reportConfig.PMIMode,'Wideband')
+                if strcmpi(reportConfig.PMIMode,'Wideband') || isModeB_r19
                     % If PMI mode is 'Wideband', only one i2 value is reported
                     % and the SINR values are obtained for the entire BWP in
                     % the SINRPerSubband field of PMIInfo output. In this case
                     % compute the SINR values corresponding to subband or
-                    % wideband based on the CQI mode
+                    % wideband based on the CQI mode.
+                    % isModeB_r19: Phase 2 stores per-subband SINR in
+                    % SINRPerREPMI directly (not in tensor SINRPerSubband),
+                    % so always use getSubbandSINR path for Mode B Rel-19.
                     SINRperSubband = getSubbandSINR(sinrPerREPMI,CQISubbandInfo,csirsIndSubs_k);
                 else
                     % If PMI mode is 'Subband', when codebook type is specified
