@@ -373,17 +373,20 @@ function [RI,PMISet,PMIInfo] = nrRISelect(carrier,csirs,reportConfig,H,varargin)
         % defined in TS 38.214 Section 5.2.2.2.1
         maxRank = min([nRxAnts Pcsirs 8]);
     elseif strcmpi(reportConfig.CodebookType,'Type2') ||...
-            (strcmpi(reportConfig.CodebookType,'eType2') && any(reportConfig.ParameterCombination == [7 8]))
+            (strcmpi(reportConfig.CodebookType,'eType2') && any(reportConfig.ParameterCombination == [7 8])) ||...
+            (strcmpi(reportConfig.CodebookType,'eTypeII-r19') && any(reportConfig.ParameterCombination == [7 8]))
         % Maximum possible rank is 2 for:
         % - Type II codebooks, as defined in TS 38.214 Section 5.2.2.2.3
         % - Enhanced type II codebooks with parameter combination value
         %   as one of {7, 8}, as defined in TS 38.214 Table 5.2.2.2.5-1
+        % ThangTQ23_128T128R_eTypeII_Rel19: same PC 7/8 constraint (Pv_3or4Layers=NaN)
         maxRank = min(nRxAnts,2);
     else
         % Maximum possible rank is 4 for:
         % - Type I multi-panel codebooks, as defined in TS 38.214 Section 5.2.2.2.2
         % - Enhanced type II codebooks with parameter combination value in
         %   the range 1:6, as defined in TS 38.214 Table 5.2.2.2.5-1
+        % - Refined eTypeII (eTypeII-r19) with PC 1-6, max rank 4 per §5.2.2.2.5a
         maxRank = min(nRxAnts,4);
     end
 
@@ -402,6 +405,10 @@ function [RI,PMISet,PMIInfo] = nrRISelect(carrier,csirs,reportConfig,H,varargin)
         if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
             % Rel-19: capacity-based RI selection via nrPMIReport
             [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,validRanks);
+        % ThangTQ23_128T128R_eTypeII_Rel19: nrDLPMISelect does not support 128 ports —
+        % route through nrPMIReport with capacity maximisation (same as r19 Mode B)
+        elseif strcmpi(reportConfig.CodebookType,'eTypeII-r19')
+            [RI,PMISet,PMIInfo] = riSelectEType2R19(carrier,csirs,reportConfig,H,nVar,validRanks);
         elseif strcmpi(alg,'MaxSINR')
             [RI,PMISet,PMIInfo] = riSelectPMI(carrier,csirs,reportConfig,H,nVar,validRanks,PMISubbandInfo);
         else % maxSE
@@ -592,7 +599,8 @@ function [reportConfig,csirsInd,nVar,alg] = validateInputs(carrier,csirs,reportC
 
     % Check for the presence of 'CodebookType' field
     if isfield(reportConfig,'CodebookType')
-        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2','typeI-SinglePanel-r19'},fcnName,'CodebookType field');
+        % ThangTQ23_128T128R_eTypeII_Rel19: added 'eTypeII-r19'
+        reportConfig.CodebookType = validatestring(reportConfig.CodebookType,{'Type1SinglePanel','Type1MultiPanel','Type2','eType2','typeI-SinglePanel-r19','eTypeII-r19'},fcnName,'CodebookType field');
     else
         reportConfig.CodebookType = 'Type1SinglePanel';
     end
@@ -719,7 +727,9 @@ function [reportConfig,csirsInd,nVar,alg] = validateInputs(carrier,csirs,reportC
         L = carrier.SymbolsPerSlot;
         % For Rel-19 the CSI-RS resource only covers 32 ports, but H covers
         % all 128 TX antennas — use actual H dimension instead of csirs port count
-        if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
+        % ThangTQ23_128T128R_eTypeII_Rel19: eTypeII-r19 also uses aggregated H
+        if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19') || ...
+                strcmpi(reportConfig.CodebookType,'eTypeII-r19')
             NumCSIRSPorts = size(H,4);
         else
             NumCSIRSPorts = csirs.NumCSIRSPorts(1);
@@ -800,6 +810,54 @@ function [RI,PMISet,PMIInfo] = riSelectR19(carrier,csirs,reportConfig,H,nVar,val
                 RI       = rank;
                 PMISet   = pmiSet_try;
                 PMIInfo  = pmiInfo_try;
+            end
+        catch
+        end
+    end
+end
+
+% =========================================================================
+% ThangTQ23_128T128R_eTypeII_Rel19
+% RI selection for eTypeII-r19 via capacity maximisation (§5.2.2.2.5a).
+% Routes through nrPMIReport — nrDLPMISelect does not support 128 ports.
+% =========================================================================
+function [RI,PMISet,PMIInfo] = riSelectEType2R19(carrier,csirs,reportConfig,H,nVar,validRanks)
+
+    RI      = NaN;
+    PMISet  = struct('W',[]);
+    PMIInfo = struct();
+
+    % Wideband channel: average over subcarriers (dim1) and symbols (dim2)
+    H_wb = reshape(mean(mean(H,1),2), size(H,3), size(H,4));
+    nRx  = size(H_wb,1);
+
+    % Build nrCSIReportConfig for eTypeII-r19
+    r19cfg                              = nrCSIReportConfig;
+    r19cfg.NSizeBWP                     = reportConfig.NSizeBWP;
+    r19cfg.NStartBWP                    = reportConfig.NStartBWP;
+    r19cfg.CodebookType                 = 'eTypeII-r19';
+    r19cfg.PanelDimensions              = reportConfig.PanelDimensions;
+    r19cfg.ParameterCombination         = reportConfig.ParameterCombination;
+    r19cfg.NumberOfPMISubbandsPerCQISubband = reportConfig.NumberOfPMISubbandsPerCQISubband;
+    % ThangTQ23_128T128R_eTypeII_Rel19: always wideband for RI selection.
+    % Capacity is estimated on wideband H only (W(:,:,1) proxy) — running
+    % subband PMI here wastes ~numSubbands× compute with identical result.
+    % Subband PMI/CQI is computed separately in nrCQISelect.
+    r19cfg.PMIFormatIndicator = 'wideband';
+
+    bestCap = -Inf;
+    for rank = validRanks
+        try
+            [pmiSet_try, pmiInfo_try] = nr5g.internal.nrPMIReport( ...
+                carrier, csirs, r19cfg, rank, H, nVar);
+            W   = pmiInfo_try.W(:,:,1);   % first subband as wideband proxy
+            HW  = H_wb * W;
+            cap = real(log2(det(eye(nRx) + (1/nVar) * (HW * HW'))));
+            if cap > bestCap
+                bestCap = cap;
+                RI      = rank;
+                PMISet  = pmiSet_try;
+                PMIInfo = pmiInfo_try;
             end
         catch
         end

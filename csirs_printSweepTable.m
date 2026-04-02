@@ -2,18 +2,19 @@ function csirs_printSweepTable(results, snrList)
 %CSIRS_PRINTSWEEPTABLE  Print SNR sweep comparison table.
 %
 %  Columns per SNR point: RI avg | MCS avg | TP avg (Mbps) | % vs B
-%  Rows: B (reference), C (Mode A), D (Mode B)
+%  Rows: B (reference), C (Mode A), D (Mode B), E (eTypeII-r19)
 %
 %  Inputs:
 %    results  - struct array (1 x nSNR), each element has:
 %                 .snr          scalar
-%                 .ri  [1x3]    avg RI  (B C D)
-%                 .mcs [1x3]    avg MCS (B C D)
-%                 .tp  [1x3]    avg TP in Mbps (B C D)
+%                 .ri  [1x4]    avg RI  (B C D E)
+%                 .mcs [1x4]    avg MCS (B C D E)
+%                 .tp  [1x4]    avg TP in Mbps (B C D E)
 %    snrList  - [1 x nSNR] SNR values in dB
 
 nSNR = length(snrList);
-labels = {'B: SVD (ref)', 'C: Mode A   ', 'D: Mode B   '};
+% ThangTQ23_128T128R_eTypeII_Rel19: added Approach E label
+labels = {'B: SVD (ref)', 'C: Mode A   ', 'D: Mode B   ', 'E: eTypeII-r19'};
 
 % ── Header ───────────────────────────────────────────────────────────────
 fprintf('\n');
@@ -50,7 +51,7 @@ sep = repmat('-', 1, 14 + nSNR*32);
 fprintf('%s\n', sep);
 
 % ── Data rows ─────────────────────────────────────────────────────────────
-for appIdx = 1:3   % B=1, C=2, D=3
+for appIdx = 1:4   % B=1, C=2, D=3, E=4 (ThangTQ23_128T128R_eTypeII_Rel19)
     fprintf('%-14s', labels{appIdx});
     for i = 1:nSNR
         ri_val  = results(i).ri(appIdx);

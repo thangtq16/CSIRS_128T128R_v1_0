@@ -37,6 +37,8 @@ function [reportConfig,csirsInd] = validateCSIInputs(carrier,csirs,reportConfig,
     isType1MultiPanel = strcmpi(reportConfig.CodebookType,"Type1MultiPanel");
     isType2 = strcmpi(reportConfig.CodebookType,"Type2");
     isEnhType2 = strcmpi(reportConfig.CodebookType,"eType2");
+    % ThangTQ23_128T128R_eTypeII_Rel19: Refined eTypeII (TS 38.214 §5.2.2.2.5a)
+    isRefinedEnhType2 = strcmpi(reportConfig.CodebookType,"eTypeII-r19");
 
     % Validate 'PanelDimensions'
     Ng = reportConfig.PanelDimensions(1);
@@ -46,6 +48,9 @@ function [reportConfig,csirsInd] = validateCSIInputs(carrier,csirs,reportConfig,
         csirsPortsSupported = [4 8 12 16 24 32];
     elseif isEnhType2
         csirsPortsSupported = [4 8 12 16 24 32];
+    % ThangTQ23_128T128R_eTypeII_Rel19: §5.2.2.2.5a supports 48/64/128 ports
+    elseif isRefinedEnhType2
+        csirsPortsSupported = [48 64 128];
     elseif isType1SinglePanel
         csirsPortsSupported = [2 4 8 12 16 24 32];
     else
@@ -57,7 +62,7 @@ function [reportConfig,csirsInd] = validateCSIInputs(carrier,csirs,reportConfig,
         coder.internal.errorIf(~any(NumCSIRSPorts == [8 16 32]),'nr5g:nrCSIReportCSIRS:InvalidNumCSIRSPortsForMP');
     end
     Pcsirs = 2*prod(reportConfig.PanelDimensions);
-    if ~isType1MultiPanel % "Type1SinglePanel", "Type2", "eType2"
+    if ~isType1MultiPanel % "Type1SinglePanel", "Type2", "eType2", "eTypeII-r19"
         OverSamplingFactors = [1 1];
         if NumCSIRSPorts > 2
             coder.internal.errorIf(Ng ~= 1,'nr5g:nrCSIReportCSIRS:InvalidNumberOfPanels')            
@@ -118,6 +123,11 @@ function [reportConfig,csirsInd] = validateCSIInputs(carrier,csirs,reportConfig,
             codebookSubsetRestrictionRefLen = 6;            
         end
         
+    elseif isRefinedEnhType2
+        % ThangTQ23_128T128R_eTypeII_Rel19: CBSR-r19 uses block bitmap (X1^c, X2^c).
+        % Defer length validation until TypeIICBSR_r19 property is added.
+        % For now, skip check (CodebookSubsetRestriction should be empty).
+        codebookSubsetRestrictionRefLen = 0;
     else % Type II and enhanced type II codebooks
         if N2 == 1
             codebookSubsetRestrictionRefLen = 8*N1*N2;
@@ -143,6 +153,13 @@ function [reportConfig,csirsInd] = validateCSIInputs(carrier,csirs,reportConfig,
             'nr5g:nrCSIReportCSIRS:InvalidParameterCombination32Ports',num2str(reportConfig.ParameterCombination));
 
         % Validate 'NumberOfPMISubbandsPerCQISubband'
+        coder.internal.errorIf(reportConfig.ParameterCombination >= 7 && reportConfig.NumberOfPMISubbandsPerCQISubband == 2,...
+            'nr5g:nrCSIReportCSIRS:InvalidPCAndNumberOfPMISubbandsPerCQISubbandComb',num2str(reportConfig.ParameterCombination));
+    % ThangTQ23_128T128R_eTypeII_Rel19: §5.2.2.2.5a constraints
+    elseif isRefinedEnhType2
+        % paramCombination 7/8 (L=6) only valid when P_CSIRS>=32, already
+        % guaranteed since csirsPortsSupported=[48 64 128].
+        % R=2 not allowed when paramCombination in {7,8} per §5.2.2.2.5a
         coder.internal.errorIf(reportConfig.ParameterCombination >= 7 && reportConfig.NumberOfPMISubbandsPerCQISubband == 2,...
             'nr5g:nrCSIReportCSIRS:InvalidPCAndNumberOfPMISubbandsPerCQISubbandComb',num2str(reportConfig.ParameterCombination));
     end

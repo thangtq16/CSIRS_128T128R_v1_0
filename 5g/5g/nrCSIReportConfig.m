@@ -239,7 +239,8 @@ classdef nrCSIReportConfig < nr5g.internal.BWPSizeStart & comm.internal.ConfigBa
     % Constant, hidden properties
     properties (Constant,Hidden)
         CQITable_Values = {'table1','table2','table3','table4-r17'};
-        CodebookType_Values = {'type1SinglePanel','type1MultiPanel','type2','eType2','typeI-SinglePanel-r19'};
+        % ThangTQ23_128T128R_eTypeII_Rel19: added 'eTypeII-r19' (TS 38.214 §5.2.2.2.5a)
+        CodebookType_Values = {'type1SinglePanel','type1MultiPanel','type2','eType2','typeI-SinglePanel-r19','eTypeII-r19'};
         CQIFormatIndicator_Values = {'wideband','subband'};
         PMIFormatIndicator_Values = {'wideband','subband'};
     end
@@ -278,7 +279,8 @@ classdef nrCSIReportConfig < nr5g.internal.BWPSizeStart & comm.internal.ConfigBa
                 case {"NumberOfBeams", "PhaseAlphabetSize", "SubbandAmplitude"}
                     inactive = ~strcmpi(obj.CodebookType,"type2");
                 case {"ParameterCombination", "NumberOfPMISubbandsPerCQISubband"}
-                    inactive = ~strcmpi(obj.CodebookType,"eType2");
+                    % ThangTQ23_128T128R_eTypeII_Rel19: eTypeII-r19 uses same params
+                    inactive = ~(strcmpi(obj.CodebookType,"eType2") || strcmpi(obj.CodebookType,"eTypeII-r19"));
                 case {"SubbandSize"}
                     inactive = ~(strcmpi(obj.PMIFormatIndicator,"subband") || strcmp(obj.CQIFormatIndicator,"subband"));
                 case {"PRGBundleSize","I2Restriction"}
@@ -368,10 +370,11 @@ classdef nrCSIReportConfig < nr5g.internal.BWPSizeStart & comm.internal.ConfigBa
 
         function val = get.NumberOfBeams(obj)
             val = obj.NumberOfBeams;
-            if strcmpi(obj.CodebookType,'eType2')
+            if strcmpi(obj.CodebookType,'eType2') || strcmpi(obj.CodebookType,'eTypeII-r19')
                 % Provide the value of NumberOfBeams for enhanced type 2
                 % codebooks based on ParameterCombination, as defined in
                 % TS 38.214 Table 5.2.2.2.5-1.
+                % ThangTQ23_128T128R_eTypeII_Rel19: eTypeII-r19 uses same table
                 configTable = eType2ParameterConfigurationTable;
                 val = configTable{obj.ParameterCombination,2};
             end
@@ -379,10 +382,11 @@ classdef nrCSIReportConfig < nr5g.internal.BWPSizeStart & comm.internal.ConfigBa
 
         function val = get.PhaseAlphabetSize(obj)
             val = obj.PhaseAlphabetSize;
-            if strcmpi(obj.CodebookType,'eType2')
+            if strcmpi(obj.CodebookType,'eType2') || strcmpi(obj.CodebookType,'eTypeII-r19')
                 % Return the value of PhaseAlphabetSize for enhanced type 2
                 % codebooks as 16, as defined in TS 38.214 Section
                 % 5.2.2.2.5.
+                % ThangTQ23_128T128R_eTypeII_Rel19: eTypeII-r19 fixed at 16-PSK
                 val = 16;
             end
         end
@@ -395,7 +399,8 @@ classdef nrCSIReportConfig < nr5g.internal.BWPSizeStart & comm.internal.ConfigBa
                     maxRank = 8;
                 case "type2"
                     maxRank = 2;
-                otherwise % "type1MultiPanel" or "eType2
+                otherwise % "type1MultiPanel", "eType2", or "eTypeII-r19"
+                    % ThangTQ23_128T128R_eTypeII_Rel19: max RI=4 per §5.2.2.2.5a
                     maxRank = 4;
             end
             riRestrictionLen = numel(temp);

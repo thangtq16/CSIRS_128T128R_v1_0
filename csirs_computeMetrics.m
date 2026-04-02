@@ -9,12 +9,12 @@ function m = csirs_computeMetrics(fb, carrier)
 %
 %  Inputs:
 %    fb      - struct from csirs_feedback:
-%                ri_B/C/D, cqi_B/C/D, cap_B/C/D
-%                sinrPerRE_C, sinrPerRE_D  (linear [nRE x nLayers])
+%                ri_B/C/D/E, cqi_B/C/D/E, cap_B/C/D/E
+%                sinrPerRE_C, sinrPerRE_D, sinrPerRE_E  (linear [nRE x nLayers])
 %    carrier - nrCarrierConfig (NSizeGrid, SubcarrierSpacing)
 %
 %  Output:
-%    m - struct (each field is [1x3] vector, order: B C D):
+%    m - struct (each field is [1x4] vector, order: B C D E):
 %          .ri  - RI per approach
 %          .mcs - MCS index per approach (0-based, TS 38.214 Table 5.1.3.1-1)
 %          .tp  - throughput in Mbps per approach
@@ -45,6 +45,10 @@ mcs_C = nr5g.internal.computeMCS(l2sm, carrier, pdsch_C, fb.sinrPerRE_C, 'qam64'
 pdsch_D = makePDSCH(carrier, fb.ri_D);
 mcs_D = nr5g.internal.computeMCS(l2sm, carrier, pdsch_D, fb.sinrPerRE_D, 'qam64');
 
+% Approach E — ThangTQ23_128T128R_eTypeII_Rel19
+pdsch_E = makePDSCH(carrier, fb.ri_E);
+mcs_E = nr5g.internal.computeMCS(l2sm, carrier, pdsch_E, fb.sinrPerRE_E, 'qam64');
+
 % ── Throughput from MCS index (TS 38.214 Table 5.1.3.1-1, qam64) ─────────
 mcsTab = nrPDSCHMCSTables().QAM64Table;   % columns: MCSIndex Qm TargetCodeRate SE
 
@@ -53,11 +57,12 @@ tp_fn = @(ri, mcsIdx) computeTP(ri, mcsIdx, mcsTab, nRE_slot, slotDur_s);
 tp_B = tp_fn(fb.ri_B, mcs_B) / 1e6;   % Mbps
 tp_C = tp_fn(fb.ri_C, mcs_C) / 1e6;
 tp_D = tp_fn(fb.ri_D, mcs_D) / 1e6;
+tp_E = tp_fn(fb.ri_E, mcs_E) / 1e6;   % ThangTQ23_128T128R_eTypeII_Rel19
 
 % ── Pack output ───────────────────────────────────────────────────────────
-m.ri  = [fb.ri_B, fb.ri_C, fb.ri_D];
-m.mcs = [mcs_B,   mcs_C,   mcs_D];
-m.tp  = [tp_B,    tp_C,    tp_D];
+m.ri  = [fb.ri_B, fb.ri_C, fb.ri_D, fb.ri_E];
+m.mcs = [mcs_B,   mcs_C,   mcs_D,   mcs_E];
+m.tp  = [tp_B,    tp_C,    tp_D,    tp_E];
 
 end
 

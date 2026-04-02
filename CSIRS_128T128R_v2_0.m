@@ -1,16 +1,19 @@
 %% 128T128R NZP-CSI-RS — SNR Sweep: RI / MCS / Throughput Average
 %
-%  Compares CSI feedback approaches B / C / D over multiple SNR points
+%  Compares CSI feedback approaches B / C / D / E over multiple SNR points
 %  (representing cell radius: far / medium / near) and channel realizations.
 %
 %  Approaches:
-%    B — Full 128-port SVD upper bound        (ideal reference)
-%    C — Rel-19 Type I Single-Panel Mode A    (TS 38.214 S5.2.2.2.1a)
-%    D — Rel-19 Type I Single-Panel Mode B    (TS 38.214 S5.2.2.2.1a)
+%    B — Full 128-port SVD upper bound          (ideal reference)
+%    C — Rel-19 Type I Single-Panel Mode A      (TS 38.214 S5.2.2.2.1a)
+%    D — Rel-19 Type I Single-Panel Mode B      (TS 38.214 S5.2.2.2.1a)
+%    E — Rel-19 Refined eTypeII 128-port        (TS 38.214 S5.2.2.2.5a)
+%        ThangTQ23_128T128R_eTypeII_Rel19
 %
 %  References:
-%    TS 38.211 S7.4.1.5  (CSI-RS signal generation)
+%    TS 38.211 S7.4.1.5    (CSI-RS signal generation)
 %    TS 38.214 S5.2.2.2.1a (Refined Type I Single Panel, Rel-19)
+%    TS 38.214 S5.2.2.2.5a (Refined eTypeII, Rel-19)
 %
 %  Author: ThangTQ23 - VSI
 %  Date:   2026-03
@@ -41,9 +44,14 @@ panelDimensions = [gnbArraySize(5), gnbArraySize(2), gnbArraySize(1)];  % [Ng, N
 % PMI / CQI mode selection
 pmiMode = 'Subband';   % 'Subband' | 'Wideband'
 cqiMode = 'Wideband';  % 'Wideband' | 'Subband'
-%   Subband CQI: fb.cqi_C/D = [WB; SB1; SB2; ...] — finer granularity
+%   Subband CQI: fb.cqi_C/D/E = [WB; SB1; SB2; ...] — finer granularity
 %   Note: Approach D PMI is always wideband (Mode B beam search constraint),
 %         but Approach D CQI follows cqiMode like Approach C.
+
+% ThangTQ23_128T128R_eTypeII_Rel19: Approach E ParameterCombination
+% Per TS 38.214 Table 5.2.2.2.5-1: 1-6 → L=2/4, 7-8 → L=6 (maxRank=2)
+% PC=5: L=4, pv(v=1..4)=1/4, β=1/4 — balanced overhead, supports rank 1~4
+paramCombE = 5;
 
 % Channel parameters
 channelCfg.DelayProfile        = 'CDL-B';   % near-uniform SV → rank diversity
@@ -80,10 +88,10 @@ fprintf('(Total runs: %d)\n\n', nSNR * nRealiz);
 for iSNR = 1:nSNR
     SNRdB = snrList(iSNR);
 
-    % Accumulate metrics over realizations: rows = realizations, cols = B C D
-    acc_ri  = zeros(nRealiz, 3);
-    acc_mcs = zeros(nRealiz, 3);
-    acc_tp  = zeros(nRealiz, 3);
+    % Accumulate metrics over realizations: rows = realizations, cols = B C D E
+    acc_ri  = zeros(nRealiz, 4);
+    acc_mcs = zeros(nRealiz, 4);
+    acc_tp  = zeros(nRealiz, 4);
 
     for iReal = 1:nRealiz
         release(channel);   % new channel realization
@@ -98,8 +106,9 @@ for iSNR = 1:nSNR
             carrier, rxGrid_s0, rxGrid_s1, allCsirsInd, allCsirsSym, ...
             slotAssign, cdmLengths, nTxAntennas, nRxAntennas);
 
-        % Section 10: CSI feedback (B / C / D)
-        fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign, pmiMode, cqiMode, panelDimensions);
+        % Section 10: CSI feedback (B / C / D / E)
+        % ThangTQ23_128T128R_eTypeII_Rel19: pass paramCombE for Approach E
+        fb = csirs_feedback(carrier, csirs, H_est_full, nVar_all, slotAssign, pmiMode, cqiMode, panelDimensions, paramCombE);
 
         % RI + MCS + Throughput
         m = csirs_computeMetrics(fb, carrier);
@@ -115,10 +124,10 @@ for iSNR = 1:nSNR
     results(iSNR).mcs = mean(acc_mcs, 1);
     results(iSNR).tp  = mean(acc_tp,  1);
 
-    fprintf('  SNR=%+3ddB  |  RI: B=%.2f C=%.2f D=%.2f  |  TP(Mbps): B=%.1f C=%.1f D=%.1f\n', ...
+    fprintf('  SNR=%+3ddB  |  RI: B=%.2f C=%.2f D=%.2f E=%.2f  |  TP(Mbps): B=%.1f C=%.1f D=%.1f E=%.1f\n', ...
         SNRdB, ...
-        results(iSNR).ri(1),  results(iSNR).ri(2),  results(iSNR).ri(3), ...
-        results(iSNR).tp(1),  results(iSNR).tp(2),  results(iSNR).tp(3));
+        results(iSNR).ri(1),  results(iSNR).ri(2),  results(iSNR).ri(3),  results(iSNR).ri(4), ...
+        results(iSNR).tp(1),  results(iSNR).tp(2),  results(iSNR).tp(3),  results(iSNR).tp(4));
 end
 
 %% ── OUTPUT TABLE ──────────────────────────────────────────────────────────

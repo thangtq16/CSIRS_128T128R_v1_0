@@ -375,6 +375,10 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
     if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19')
         numCSIRSPorts = size(H,4);
     end
+    % ThangTQ23_128T128R_eTypeII_Rel19: H aggregated over K CSI-RS resources (§5.2.2.2.5a)
+    if strcmpi(reportConfig.CodebookType,'eTypeII-r19')
+        numCSIRSPorts = size(H,4);
+    end
     nr5g.internal.validateLayerDependentParams(carrier,reportConfig,numCSIRSPorts,H,nLayers);
 
     % Set the below flags to identify the codebook type
@@ -384,6 +388,8 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
     isEnhType2 = strcmpi(reportConfig.CodebookType,'eType2');
     % ThangTQ23_128T128R_Rel19: Refined Type I Single-Panel (TS 38.214 §5.2.2.2.1a)
     isType1SinglePanel_r19 = strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19');
+    % ThangTQ23_128T128R_eTypeII_Rel19: Refined eTypeII (TS 38.214 §5.2.2.2.5a)
+    isRefinedEnhType2 = strcmpi(reportConfig.CodebookType,'eTypeII-r19');
     if isType1SinglePanel_r19; isType1SinglePanel = true; end
     % modeB all ranks: factored search path (no precomputed codebook)
     isModeB_r19 = isType1SinglePanel_r19 && (reportConfig.CodebookMode == 2);
@@ -464,7 +470,9 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
         SINRPerREOut = [];
         codebookOut  = [];
 
-    elseif isType2 || isEnhType2
+    elseif isType2 || isEnhType2 || isRefinedEnhType2
+        % ThangTQ23_128T128R_eTypeII_Rel19: eTypeII-r19 reuses same wideband engine —
+        % getTypeIIPMIWideband is fully parameterized by N1,N2 (no port-count limit).
         [W,PMISet,SubbandSINRs,wbInfo] = getTypeIIPMIWideband(reportConfig,Hcsirs,nLayers,nVar,PMINaNSet);
         if all(isnan(W))
             PMISet = PMINaNSet;
@@ -481,7 +489,9 @@ function [PMISet,info] = nrPMIReport(carrier,csirs,reportConfig,nLayers,H,nVar)
     % Get the number of subbands
     numSubbands = subbandInfo.NumSubbands;
     if ~isModeB_r19 && (numSubbands > 1 || (isType2 && reportConfig.SubbandAmplitude))
-        if isType2 || isEnhType2
+        if isType2 || isEnhType2 || isRefinedEnhType2
+            % ThangTQ23_128T128R_eTypeII_Rel19: same subband engine, W2CompressionEnhancedType2
+            % and quantizeW2ForEnhancedType2 are fully parameterized by N1,N2.
             [PMISet,W,SINRPerREPMI,SubbandSINRs] = getTypeIIPMISubband(reportConfig,H_bwp,nVar,nLayers,csirsIndBWP_k,csirsIndBWP_l,PMISet,wbInfo,subbandInfo,indexSetSizes);
         else
             [PMISet,W,SINRPerREPMI,SubbandSINRs] = getTypeIPMISubband(reportConfig,codebook,PMISet,SINRPerRE,subbandInfo,indexSetSizes,csirsIndBWP_k);
@@ -1522,6 +1532,8 @@ function [PMINaNSet,nanInfo] = getPMINaNSet(reportConfig,subbandInfo,codebook,in
     isEnhType2 = strcmpi(reportConfig.CodebookType,'eType2');
     % ThangTQ23_128T128R_Rel19
     if strcmpi(reportConfig.CodebookType,'typeI-SinglePanel-r19'); isType1SinglePanel = true; end
+    % ThangTQ23_128T128R_eTypeII_Rel19: same NaN structure as eType2
+    isRefinedEnhType2 = strcmpi(reportConfig.CodebookType,'eTypeII-r19');
     csirsIndLen = length(csirsIndBWP_k);
     nanInfo.CSIRSIndices = NaN(csirsIndLen,3);
 
@@ -1537,7 +1549,8 @@ function [PMINaNSet,nanInfo] = getPMINaNSet(reportConfig,subbandInfo,codebook,in
         nanInfo.SINRPerSubband = NaN(subbandInfo.NumSubbands,nLayers);
         nanInfo.Codebook = [];
         nanInfo.W = NaN(numCSIRSPorts,nLayers,subbandInfo.NumSubbands);
-    elseif isEnhType2
+    elseif isEnhType2 || isRefinedEnhType2
+        % ThangTQ23_128T128R_eTypeII_Rel19: identical PMI index structure to eType2
         pv = reportConfig.Tables.EnhancedType2Configurations{reportConfig.ParameterCombination,3+floor((nLayers-1)/2)};
         Mv = ceil(pv*subbandInfo.NumSubbands/reportConfig.NumberOfPMISubbandsPerCQISubband);
         numI1Indices = 4 + (1 + 2*reportConfig.NumberOfBeams*Mv + 1)*nLayers;
