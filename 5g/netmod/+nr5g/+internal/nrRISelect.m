@@ -839,11 +839,15 @@ function [RI,PMISet,PMIInfo] = riSelectEType2R19(carrier,csirs,reportConfig,H,nV
     r19cfg.PanelDimensions              = reportConfig.PanelDimensions;
     r19cfg.ParameterCombination         = reportConfig.ParameterCombination;
     r19cfg.NumberOfPMISubbandsPerCQISubband = reportConfig.NumberOfPMISubbandsPerCQISubband;
-    % ThangTQ23_128T128R_eTypeII_Rel19: always wideband for RI selection.
-    % Capacity is estimated on wideband H only (W(:,:,1) proxy) — running
-    % subband PMI here wastes ~numSubbands× compute with identical result.
-    % Subband PMI/CQI is computed separately in nrCQISelect.
-    r19cfg.PMIFormatIndicator = 'wideband';
+    % ThangTQ23_128T128R_eTypeII_Rel19 Phase 4: respect reportConfig.PMIMode.
+    % When PMIMode='Subband', nrPMIReport returns W as [numPorts×rank×numSubbands]
+    % so that per-subband precoders reach the scheduler for frequency-selective
+    % precoding.  The capacity proxy still uses W(:,:,1) regardless of mode.
+    if isfield(reportConfig, 'PMIMode') && strcmpi(reportConfig.PMIMode, 'Subband')
+        r19cfg.PMIFormatIndicator = 'subband';
+    else
+        r19cfg.PMIFormatIndicator = 'wideband';
+    end
 
     bestCap = -Inf;
     for rank = validRanks

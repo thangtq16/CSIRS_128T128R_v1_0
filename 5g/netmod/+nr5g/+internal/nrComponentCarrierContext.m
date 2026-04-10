@@ -201,7 +201,18 @@ classdef nrComponentCarrierContext < handle
                     numCSIRSPorts = cellConfig.NumTransmitAntennas;
                 end
 
-                obj.PrecodingGranularity = cellConfig.NumResourceBlocks;
+                % ThangTQ23_128T128R_Rel19 Phase 4: for 128T subband PMI,
+                % precoding granularity = PMI subband size (4 RBs for NRB∈[24,72],
+                % TS 38.214 Table 5.2.1.4-2) so numPRGs = ceil(24/4) = 6 matches
+                % the 6 subbands returned by nrPMIReport with PMIMode='Subband'.
+                is128T_cc = ~isempty(param.CSIRSConfiguration) && ...
+                            numel(param.CSIRSConfiguration) >= 4 && ...
+                            sum([param.CSIRSConfiguration.NumCSIRSPorts]) >= 128;
+                if is128T_cc
+                    obj.PrecodingGranularity = 4;
+                else
+                    obj.PrecodingGranularity = cellConfig.NumResourceBlocks;
+                end
                 % CSI measurements initialization (DL and UL)
                 initialRank = 1; % Initial ranks for UEs
                 wp = ones(numCSIRSPorts, 1)./sqrt(numCSIRSPorts);

@@ -258,8 +258,17 @@ classdef nrUEAbstractPHY < nr5g.internal.nrUEPHY
             end
             precodingMatrix = pmiInfo.W;
 
+            % ThangTQ23_128T128R_Rel19 Phase 4: pmiInfo.W may be 3-D
+            % [numPorts×rank×numSubbands] when PMIMode='Subband'.  MATLAB's
+            % .' operator requires 2-D input, so extract subband 1 as the
+            % wideband proxy for the L2SM LQM (CQI is always wideband here).
+            if ndims(pmiInfo.W) == 3
+                W_lqm = pmiInfo.W(:,:,1).';   % [rank × numPorts] from subband 1
+            else
+                W_lqm = pmiInfo.W.';           % [rank × numPorts] wideband
+            end
             [obj.L2SMCSI, sig] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
-                carrierConfigInfo, csirsConfig, estChannelGrid, nVar, pmiInfo.W.');
+                carrierConfigInfo, csirsConfig, estChannelGrid, nVar, W_lqm);
             [obj.L2SMCSI, sinr] = nr5g.internal.L2SM.linkQualityModel(obj.L2SMCSI, sig, intf);
             [obj.L2SMCSI, cqi, cqiInfo] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
                 carrierConfigInfo, obj.CSIReferenceResource, overhead, sinr, obj.CQITableValues, blerThreshold);

@@ -29,7 +29,11 @@ function updatedUserPairingMatrix = updateUserPairingMatrix(userPairingMatrix, u
 ueCSIMeasurementDLArray = [ueContext.CSIMeasurementDL];
 ueCSIMeasurementDL = [ueCSIMeasurementDLArray.CSIRS];
 if ~isreal(ueCSIMeasurementDL(end).W)
-    W = [ueCSIMeasurementDL.W];
+    % ThangTQ23_128T128R_Rel19 Phase 4: W may be 3-D [numPorts×rank×numSubbands]
+    % for subband PMI.  Extract subband 1 as wideband proxy for orthogonality;
+    % (:,:,1) is a no-op for 2-D W so this is backward-compatible.
+    wCell = {ueCSIMeasurementDL.W};
+    W = cell2mat(cellfun(@(w) w(:,:,1), wCell, 'UniformOutput', false));
     pOrth = abs(W'*W);
     pOrth = pOrth/max(pOrth,[],'all');
     updatedUserPairingMatrix = pOrth <= 1-muMIMOConfigDL.SemiOrthogonalityFactor;

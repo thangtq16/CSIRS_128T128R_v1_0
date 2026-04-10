@@ -2804,10 +2804,18 @@ classdef nrScheduler < handle & comm.internal.ConfigBase
                     W = 1;
                 else
                     carrierContext = obj.UEContext(rnti).ComponentCarrier(carrierIndex);
-                    numPRGs =  ceil(obj.CellConfig(carrierIndex).NumResourceBlocks/carrierContext.PrecodingGranularity);
-                    W = complex(zeros(rank, size(report.W,1), numPRGs,1));
-                    for i=1:numPRGs
-                        W(:,:,i) = report.W.';
+                    numPRGs     = ceil(obj.CellConfig(carrierIndex).NumResourceBlocks / carrierContext.PrecodingGranularity);
+                    numPorts    = size(report.W, 1);
+                    % ThangTQ23_128T128R_Rel19 Phase 4: report.W may be 3-D
+                    % [numPorts×rank×numSubbands] for subband PMI.  Map each
+                    % PRG to the corresponding subband with linear scaling;
+                    % when numSubbands==1 (wideband) all PRGs share the same W.
+                    numSubbands = size(report.W, 3); % 1 for wideband, >1 for subband
+                    W = complex(zeros(rank, numPorts, numPRGs));
+                    for i = 1:numPRGs
+                        sb = min(ceil(i * numSubbands / numPRGs), numSubbands);
+                        sb = max(sb, 1);
+                        W(:,:,i) = report.W(:,:,sb).';
                     end
                 end
             end

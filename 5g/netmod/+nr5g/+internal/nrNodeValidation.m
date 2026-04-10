@@ -304,12 +304,31 @@ classdef nrNodeValidation
             end
 
             if ~isempty(connConfig.CSIRSConfiguration)
-                % Set wideband measurement CSI-RS configuration on the full bandwidth
+                % Set CSI-RS configuration on the full bandwidth
                 csiReportConfig.NStartBWP = 0;
                 csiReportConfig.NSizeBWP = connConfig.NumResourceBlocks;
-                csiReportConfig.CQIMode = 'Wideband';
-                csiReportConfig.PMIMode = 'Wideband';
-                csiReportConfig.PRGSize = [];
+                % ThangTQ23_128T128R_Rel19 Phase 4: 128T uses subband PMI so that
+                % nrRISelect returns per-subband W for frequency-selective scheduling.
+                % All other configs remain wideband (no scheduler changes needed).
+                if is128T
+                    csiReportConfig.CQIMode = 'Wideband'; % LQM CQI is always wideband
+                    csiReportConfig.PMIMode = 'Subband';  % per-subband precoder W
+                    csiReportConfig.PRGSize = 4;           % PRG = PMI subband = 4 RBs (TS 38.214 Table 5.2.1.4-2, NRB∈[24,72])
+                    % SubbandSize required by nrRISelect public validation when PMIMode='Subband'.
+                    % Derived from TS 38.214 Table 5.2.1.4-2 based on NRB.
+                    nrb = connConfig.NumResourceBlocks;
+                    if nrb >= 145
+                        csiReportConfig.SubbandSize = 16;
+                    elseif nrb >= 73
+                        csiReportConfig.SubbandSize = 8;
+                    else
+                        csiReportConfig.SubbandSize = 4;  % NRB∈[24,72]
+                    end
+                else
+                    csiReportConfig.CQIMode = 'Wideband';
+                    csiReportConfig.PMIMode = 'Wideband';
+                    csiReportConfig.PRGSize = [];
+                end
                 csiReportConfig.CodebookMode = 1;
                 csiReportConfig.CodebookSubsetRestriction = [];
                 csiReportConfig.i2Restriction = [];
