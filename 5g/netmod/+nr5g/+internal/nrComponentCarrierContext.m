@@ -201,17 +201,18 @@ classdef nrComponentCarrierContext < handle
                     numCSIRSPorts = cellConfig.NumTransmitAntennas;
                 end
 
-                % ThangTQ23_128T128R_Rel19 Phase 4: for 128T subband PMI,
-                % precoding granularity = PMI subband size (4 RBs for NRB∈[24,72],
-                % TS 38.214 Table 5.2.1.4-2) so numPRGs = ceil(24/4) = 6 matches
-                % the 6 subbands returned by nrPMIReport with PMIMode='Subband'.
-                is128T_cc = ~isempty(param.CSIRSConfiguration) && ...
-                            numel(param.CSIRSConfiguration) >= 4 && ...
-                            sum([param.CSIRSConfiguration.NumCSIRSPorts]) >= 128;
-                if is128T_cc
-                    obj.PrecodingGranularity = 4;
+                % ThangTQ23_128T128R_Rel19 Phase 4/4b: PrecodingGranularity depends on
+                % whether subband PMI is active. Use CSIReportConfiguration.PMIMode
+                % (set by nrNodeValidation from the pmiCQIMode flag) so wideband and
+                % subband modes are both supported without hardcoding.
+                useSubbandPRG = isfield(param, 'CSIReportConfiguration') && ...
+                                ~isempty(param.CSIReportConfiguration) && ...
+                                isfield(param.CSIReportConfiguration, 'PMIMode') && ...
+                                strcmpi(param.CSIReportConfiguration.PMIMode, 'Subband');
+                if useSubbandPRG
+                    obj.PrecodingGranularity = 4; % PMI subband size = 4 RBs (TS 38.214 Table 5.2.1.4-2, NRB∈[24,72])
                 else
-                    obj.PrecodingGranularity = cellConfig.NumResourceBlocks;
+                    obj.PrecodingGranularity = cellConfig.NumResourceBlocks; % wideband: 1 PRG = full BW
                 end
                 % CSI measurements initialization (DL and UL)
                 initialRank = 1; % Initial ranks for UEs
@@ -253,10 +254,11 @@ classdef nrComponentCarrierContext < handle
                 obj.CSIMeasurementDL.CSIRS.PMISet.i1 = channelQualityInfo.PMISet.i1;
                 obj.CSIMeasurementDL.CSIRS.W = channelQualityInfo.W;
             end
-            if ~isempty(schedulerConfig.LinkAdaptationConfigDL)
-                % Reset link adaptation MCS offset value to initial offset
-                obj.MCSOffset(1) = schedulerConfig.LinkAdaptationConfigDL.InitialOffset;
-            end
+            % ThangTQ23 fix: do NOT reset MCSOffset here.
+            % OLLA accumulates MCSOffset via HARQ ACK/NACK (StepUp/StepDown)
+            % across the entire simulation. Resetting on every CSI report
+            % (every 5 ms) wiped the accumulated offset and caused BLER ~60%.
+            % Initialisation is already handled in the constructor.
         end
 
         function updateChannelQualityUL(obj, channelQualityInfo, schedulerConfig)

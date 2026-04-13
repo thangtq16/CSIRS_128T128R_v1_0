@@ -236,7 +236,6 @@ classdef nrUEAbstractPHY < nr5g.internal.nrUEPHY
                 % Run PMI selection on aggregated 128-port channel
                 [dlRank, pmiSet, pmiInfo] = nr5g.internal.nrRISelect(carrierConfigInfo, ...
                     csirsConfig, reportCfg128, estChannelGrid, nVar, 'MaxSE');
-                reportCfgForLQM = reportCfg128;
             else
                 % ── Standard path (≤32T, single resource) ──────────────────
                 if csirsConfig.NumCSIRSPorts > 1
@@ -247,7 +246,6 @@ classdef nrUEAbstractPHY < nr5g.internal.nrUEPHY
                     pmiSet = struct('i1', [1 1 1], 'i2', 1);
                     pmiInfo.W = 1;
                 end
-                reportCfgForLQM = obj.CSIReportConfig;
             end
 
             % ── Step 3: CQI via LQM ─────────────────────────────────────────
@@ -258,22 +256,89 @@ classdef nrUEAbstractPHY < nr5g.internal.nrUEPHY
             end
             precodingMatrix = pmiInfo.W;
 
-            % ThangTQ23_128T128R_Rel19 Phase 4: pmiInfo.W may be 3-D
-            % [numPorts×rank×numSubbands] when PMIMode='Subband'.  MATLAB's
-            % .' operator requires 2-D input, so extract subband 1 as the
-            % wideband proxy for the L2SM LQM (CQI is always wideband here).
-            if ndims(pmiInfo.W) == 3
-                W_lqm = pmiInfo.W(:,:,1).';   % [rank × numPorts] from subband 1
+            % ThangTQ23_128T128R_Rel19 Phase 4/4b: pmiInfo.W may be 3-D
+            % [numPorts×rank×numSubbands] when PMIMode='Subband'.
+            numSBs = size(pmiInfo.W, 3); % 1 for wideband, >1 for subband
+
+            useCQISubband = numSBs > 1 && ...
+                            isfield(obj.CSIReportConfig, 'CQIMode') && ...
+                            strcmpi(obj.CSIReportConfig.CQIMode, 'Subband');
+
+            if useCQISubband
+                % ── Phase 4b: per-subband CQI ──────────────────────────────
+                % One L2SM call per subband using the subband's own precoder W
+                % AND the subband's own RB window.
+                % L2SM.prepareLQMInput builds a full-carrier SINR index cache
+                % once (keyed on hestSize), then filters to the allocated CRBs
+                % via getCRBs(carrier, chsig) which reads csirsConfig.NumRB and
+                % .RBOffset.  So passing a per-subband csirsConfig_sb correctly
+                % restricts the EESM averaging to each subband's RBs, giving
+                % genuinely frequency-selective per-subband SINR/CQI.
+                % estChannelGrid is always the full-band H — no slicing needed.
+                sbSizeRBs = round(carrierConfigInfo.NSizeGrid / numSBs);
+                cqiPerSB  = zeros(1, numSBs);
+                sinrPerSB = zeros(1, numSBs);
+                csRef = obj.CSIReferenceResource;  % value copy
+                for sb = 1:numSBs
+                    W_sb          = pmiInfo.W(:,:,sb).';   % [rank × numPorts]
+                    l2sm_sb       = obj.L2SMCSI;           % value copy — does not mutate obj.L2SMCSI
+                    csirsConfig_sb         = csirsConfig;
+                    csirsConfig_sb.NumRB   = sbSizeRBs;
+                    csirsConfig_sb.RBOffset = (sb-1) * sbSizeRBs;
+                    [l2sm_sb, sig_sb]  = nr5g.internal.L2SM.prepareLQMInput(l2sm_sb, ...
+                        carrierConfigInfo, csirsConfig_sb, estChannelGrid, nVar, W_sb);
+                    [l2sm_sb, sinr_sb] = nr5g.internal.L2SM.linkQualityModel(l2sm_sb, sig_sb, intf);
+                    [~, cqi_sb, cqiInfo_sb] = nr5g.internal.L2SM.cqiSelect(l2sm_sb, ...
+                        carrierConfigInfo, csRef, overhead, sinr_sb, obj.CQITableValues, blerThreshold);
+                    cqiPerSB(sb)  = max(cqi_sb, 1);
+                    sinrPerSB(sb) = cqiInfo_sb.EffectiveSINR;
+                end
+                % Expand to per-RB
+
+                cqi  = repelem(cqiPerSB, sbSizeRBs);  % [1 × numRBs]
+                sinr = sinrPerSB(1);  % first-subband SINR for event logging
+                % Update L2SMCSI state using subband-1 W (keeps the obj state consistent)
+                W_lqm = pmiInfo.W(:,:,1).';
+                [obj.L2SMCSI, ~] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
+                    carrierConfigInfo, csirsConfig, estChannelGrid, nVar, W_lqm);
             else
-                W_lqm = pmiInfo.W.';           % [rank × numPorts] wideband
+                % ── Wideband CQI (Phase 3 / fast path) ─────────────────────
+                if numSBs > 1
+                    W_lqm = pmiInfo.W(:,:,1).';  % subband PMI, wideband CQI: use sb-1 proxy
+                else
+                    W_lqm = pmiInfo.W.';          % true wideband W
+                end
+                [obj.L2SMCSI, sig] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
+                    carrierConfigInfo, csirsConfig, estChannelGrid, nVar, W_lqm);
+                [obj.L2SMCSI, sinr] = nr5g.internal.L2SM.linkQualityModel(obj.L2SMCSI, sig, intf);
+                [obj.L2SMCSI, cqi, cqiInfo] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
+                    carrierConfigInfo, obj.CSIReferenceResource, overhead, sinr, obj.CQITableValues, blerThreshold);
+                cqi  = max([cqi, 1]);
+                sinr = cqiInfo.EffectiveSINR;
             end
-            [obj.L2SMCSI, sig] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
-                carrierConfigInfo, csirsConfig, estChannelGrid, nVar, W_lqm);
-            [obj.L2SMCSI, sinr] = nr5g.internal.L2SM.linkQualityModel(obj.L2SMCSI, sig, intf);
-            [obj.L2SMCSI, cqi, cqiInfo] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
-                carrierConfigInfo, obj.CSIReferenceResource, overhead, sinr, obj.CQITableValues, blerThreshold);
-            cqi = max([cqi, 1]);
-            sinr = cqiInfo.EffectiveSINR;
+
+            % ThangTQ23_128T128R_Rel19: Live CSI feedback log — print UE-1 and UE-2 only.
+            % Shows RI / CQI (per subband or wideband) / PMI i1 / SINR / overhead estimate.
+            if rnti <= 2
+                absSlot  = carrierConfigInfo.NFrame * carrierConfigInfo.SlotsPerFrame + carrierConfigInfo.NSlot;
+                ri_bits  = 2;    % ceil(log2(maxRank=4))
+                pmi_bits = 20;   % approx eTypeII-r19 L=2: beam indices + wideband amplitudes
+                if useCQISubband
+                    oh_cqi_bits = 4 + 2*(numSBs - 1);  % wideband base + differential subbands
+                    cqi_str     = ['[' strtrim(num2str(cqiPerSB, '%d ')) '] (' num2str(numSBs) 'sb)'];
+                    sinr_str    = ['[' strtrim(num2str(sinrPerSB, '%.1f ')) '] dB'];
+                else
+                    oh_cqi_bits = 4;
+                    cqi_str     = sprintf('%d (WB)', cqi);
+                    sinr_str    = sprintf('%.1f dB', sinr);
+                end
+                oh_total  = ri_bits + oh_cqi_bits + pmi_bits;
+                % Show only first 3 i1 components (spatial beam indices) — eTypeII-r19 i1 has 28+ elements
+                i1_disp = pmiSet.i1(1 : min(3, numel(pmiSet.i1)));
+                i1_str  = strtrim(num2str(i1_disp, '%d '));
+                fprintf('[CSI@slot%4d] UE-%-2d  RI=%d  CQI=%s  SINR=%s  i1=[%s]  OH~%d bits\n', ...
+                    absSlot, rnti, dlRank, cqi_str, sinr_str, i1_str, oh_total);
+            end
         end
     end
 

@@ -15,16 +15,25 @@ addpath(genpath(fullfile(projectRoot, '5g')),              '-begin');
 
 wirelessnetworkSupportPackageCheck
 
+% ── PMI / CQI reporting mode for 128T eTypeII-r19 ──────────────────────────
+% 'Wideband' : single precoder + single CQI across full BW.
+%              Fastest simulation; suitable for quick sweeps or low-spec PCs.
+% 'Subband'  : per-subband precoder (PMI) + per-subband CQI (Phase 4b).
+%              Each subband = 4 RBs (TS 38.214 Table 5.2.1.4-2, NRB∈[24,72]).
+%              Best frequency-selective accuracy; ~6× slower LQM compute.
+pmiCQIMode = "Subband";   % <-- change to "Wideband" for faster runs
+
 rng("default")
-numFrameSimulation = 5;
+numFrameSimulation = 2;
 networkSimulator   = wirelessNetworkSimulator.init;
 
 %% 2. gNB Configuration
 % 128T128R massive MIMO, TDD, 4.9 GHz n79, 10 MHz / 30 kHz SCS
 % (Use channelBW = 100e6 for production; 10 MHz here for fast simulation.)
 
-gNBPosition  = [0 0 25];       % [x y z] metres
+gNBPosition  = [0 0 30];       % [x y z] metres
 duplexType   = "TDD";
+numUEs       = 64;             % total UEs — defined here so SRSPeriodicityUE can auto-scale
 
 carrierFreq  = 4.9e9;          % n79 band centre frequency (Hz)
 channelBW    = 10e6;           % channel bandwidth (Hz)
@@ -36,7 +45,7 @@ numRB = 24;   % matches channelBW = 10 MHz, SCS = 30 kHz
 
 gNB = nrGNB( ...
     Position             = gNBPosition, ...
-    TransmitPower        = 34, ...
+    TransmitPower        = 60, ...
     CarrierFrequency     = carrierFreq, ...
     ChannelBandwidth     = channelBW, ...
     SubcarrierSpacing    = scs, ...
@@ -58,28 +67,31 @@ allocationType             = 0;   % RAT-0 (RBG-based)
 
 % CSI-RS mode fields: SemiOrthogonalityFactor, MinCQI (not MinSINR — that is SRS-only)
 muMIMOConfiguration = struct( ...
-    MaxNumUsersPaired       = 2, ...
-    MaxNumLayers            = 8, ...
+    MaxNumUsersPaired       = 12, ...
+    MaxNumLayers            = 24, ...
     MinNumRBs               = 2, ...
-    SemiOrthogonalityFactor = 0.9, ...
-    MinCQI                  = 3);
+    SemiOrthogonalityFactor = 0.5, ...
+    MinCQI                  = 1);
 
 configureScheduler(gNB, ...
     ResourceAllocationType = allocationType, ...
-    MaxNumUsersPerTTI      = 10, ...
+    MaxNumUsersPerTTI      = 32, ...
     MUMIMOConfigDL         = muMIMOConfiguration, ...
     CSIMeasurementSignalDL = csiMeasurementSignalDLType);
 
 %% 4. UE Deployment
-% 10 UEs uniformly distributed at 500 m, azimuth ±60°
+% UEs scattered across a 120° sector, min 50 m – max 500 m from gNB.
+% Distance drawn from uniform distribution on area (pdf ∝ r) via sqrt-trick
+% so that UEs are spread evenly over the sector area, not clustered near gNB.
 
-numUEs         = 10;
 ueRxGain       = 0;
-ueNumTxAnt     = 1;
+ueNumTxAnt     = 4;
 ueNumRxAnt     = 4;
 
-azDeg       = -60 + 120 .* rand(numUEs, 1);   % uniform in [-60, 60] deg
-[xPos, yPos, zPos] = sph2cart(deg2rad(azDeg), zeros(numUEs,1), 500*ones(numUEs,1));
+rMin = 50;   rMax = 500;   % metres
+azDeg  = -60 + 120 .* rand(numUEs, 1);                      % uniform azimuth in [-60°, +60°]
+rDist  = sqrt(rMin^2 + (rMax^2 - rMin^2) .* rand(numUEs, 1)); % uniform on area (pdf ∝ r)
+[xPos, yPos, zPos] = sph2cart(deg2rad(azDeg), zeros(numUEs,1), rDist);
 uePositions = [xPos, yPos, zPos] + gNBPosition;
 ueNames     = "UE-" + (1:numUEs);
 
@@ -89,6 +101,9 @@ UEs = nrUE( ...
     ReceiveGain         = ueRxGain, ...
     NumTransmitAntennas = ueNumTxAnt, ...
     NumReceiveAntennas  = ueNumRxAnt);
+
+% Apply PMI/CQI mode before connectUE so nrNodeValidation picks it up.
+gNB.PMICQIMode = pmiCQIMode;
 
 connectUE(gNB, UEs, FullBufferTraffic = "DL", CSIReportPeriodicity = 10);
 
@@ -128,17 +143,71 @@ metricsVisualizer = helperNRMetricsVisualizer(gNB, UEs, ...
 
 simulationLogFile = "simulationLogs";
 
-%% 8. Run Simulation
+%% 8. Simulation Conditions Summary
+
+slotsPerSubfm  = scs / 15e3;           % slots per subframe (2 for 30 kHz SCS)
+slotDurMs      = 1 / slotsPerSubfm;    % ms per slot
+slotsPerFrm    = 10 * slotsPerSubfm;   % slots per 10-ms frame
+csiPeriodicity = 10;                   % slots (set in connectUE call above)
+csiPeriodMs    = csiPeriodicity * slotDurMs;
+numCSIEvents   = floor(numFrameSimulation * slotsPerFrm / csiPeriodicity);
+
+if strcmpi(pmiCQIMode, 'Subband')
+    if numRB >= 145; sbSize = 16; elseif numRB >= 73; sbSize = 8; else; sbSize = 4; end
+    numSubbands = ceil(numRB / sbSize);
+    oh_cqi = 4 + 2*(numSubbands - 1);   % wideband base + differential per extra subband
+    modeStr = sprintf('Subband (PMI+CQI) | %d × %d RBs', numSubbands, sbSize);
+else
+    sbSize = numRB;  numSubbands = 1;  oh_cqi = 4;
+    modeStr = 'Wideband (PMI+CQI)';
+end
+oh_ri = 2;  oh_pmi = 20;   % RI: ceil(log2(4)); PMI approx (eTypeII-r19, L=2)
+oh_total = oh_ri + oh_cqi + oh_pmi;
+
+sep = repmat('═', 1, 67);
+fprintf('\n%s\n', sep);
+fprintf('  SIMULATION CONDITIONS — 128T128R MU-MIMO DL, Rel-19 eTypeII\n');
+fprintf('%s\n', sep);
+fprintf('  System\n');
+fprintf('    gNB  : %dT/%dR | %.1f GHz (n79) | %s | %d dBm Tx\n', ...
+    gNB.NumTransmitAntennas, gNB.NumReceiveAntennas, ...
+    carrierFreq/1e9, duplexType, 34);
+fprintf('           BW=%.0f MHz | NRB=%d | SCS=%.0f kHz | Rx Gain=11 dB\n', ...
+    channelBW/1e6, numRB, scs/1e3);
+fprintf('    UE   : %d nodes | %dTx/%dRx | R=500 m | Az=[-60°,+60°] | Rx Gain=0 dB\n', ...
+    numUEs, ueNumTxAnt, ueNumRxAnt);
+fprintf('  Channel  : %s | RMS delay=%.0f ns | f_D=%.0f Hz\n', ...
+    channelConfig.DelayProfile, channelConfig.DelaySpread*1e9, channelConfig.MaximumDopplerShift);
+fprintf('  Scheduler\n');
+fprintf('    Source : %s | MU-MIMO ≤%d paired / ≤%d layers | RAT-%d\n', ...
+    csiMeasurementSignalDLType, muMIMOConfiguration.MaxNumUsersPaired, ...
+    muMIMOConfiguration.MaxNumLayers, allocationType);
+fprintf('             MinCQI=%d | Semiortho=%.1f | SRS period=20 ms\n', ...
+    muMIMOConfiguration.MinCQI, muMIMOConfiguration.SemiOrthogonalityFactor);
+fprintf('  CSI Feedback\n');
+fprintf('    Signal   : CSI-RS (4×32-port Row-18 resources ≡ 128T)\n');
+fprintf('    Codebook : eTypeII-r19 | Panel [1×16×4] | L=2 beams | PC=1\n');
+fprintf('    Mode     : %s\n', modeStr);
+fprintf('    Period   : %d slots (%.1f ms) → ~%d reports/UE in %d frames\n', ...
+    csiPeriodicity, csiPeriodMs, numCSIEvents, numFrameSimulation);
+fprintf('    OH est.  : RI=%d + CQI=%d + PMI≈%d ≈ %d bits/report\n', ...
+    oh_ri, oh_cqi, oh_pmi, oh_total);
+fprintf('    [Live CSI events printed below for UE-1 and UE-2 only]\n');
+fprintf('  Simulation : %d frames | %.0f ms | full-buffer DL | logging=%s\n', ...
+    numFrameSimulation, numFrameSimulation*10, upper(char(string(enableTraces))));
+fprintf('%s\n\n', sep);
+
+%% 9. Run Simulation
 
 simulationTime = numFrameSimulation * 1e-2;   % seconds
 run(networkSimulator, simulationTime);
 
-%% 9. Results — KPI Summary
+%% 10. Results — KPI Summary
 % Display cell throughput, spectral efficiency, and BLER ECDF.
 
 displayPerformanceIndicators(metricsVisualizer);
 
-%% 10. Save Traces
+%% 11. Save Traces
 
 if enableTraces
     simulationLogs = cell(1,1);
@@ -158,7 +227,42 @@ if enableTraces
     save(simulationLogFile, "simulationLogs");
 end
 
-%% 11. MU-MIMO Pairing Analysis — UEs per RB Distribution
+%% 11b. Grant / MCS Summary — gNB Downlink Decisions
+
+if enableTraces
+    colMap   = simSchedulingLogger.GrantLogsColumnIndexMap;
+    % getGrantLogs prepends an alphabetical header row; skip it, use colMap for column indices.
+    grantRaw = logInfo.SchedulingAssignmentLogs(2:end, :);
+
+    rntiCol  = colMap('RNTI');
+    mcsCol   = colMap('MCS Index');
+    lyrCol   = colMap('NumLayers');
+    typeCol  = colMap('Grant Type');
+
+    isDL   = strcmp(grantRaw(:, typeCol), 'DL');
+    dlData = grantRaw(isDL, :);
+    nDL    = sum(isDL);
+
+    sep2 = repmat('─', 1, 67);
+    fprintf('\n%s\n', sep2);
+    fprintf('  gNB DL Grant Summary  (%d grants | %d frames | %s mode)\n', ...
+        nDL, numFrameSimulation, pmiCQIMode);
+    fprintf('%s\n', sep2);
+    fprintf('  %-6s  %7s  %8s  %8s  %8s  %8s\n', ...
+        'UE', 'Grants', 'MCS avg', 'MCS min', 'MCS max', 'Lyr avg');
+    fprintf('%s\n', sep2);
+    for ueIdx = 1:numUEs
+        mask = cell2mat(dlData(:, rntiCol)) == ueIdx;
+        if ~any(mask); continue; end
+        mcsV = cell2mat(dlData(mask, mcsCol));
+        lyrV = cell2mat(dlData(mask, lyrCol));
+        fprintf('  UE-%-3d  %7d  %8.1f  %8d  %8d  %8.1f\n', ...
+            ueIdx, sum(mask), mean(mcsV), min(mcsV), max(mcsV), mean(lyrV));
+    end
+    fprintf('%s\n\n', sep2);
+end
+
+%% 12. MU-MIMO Pairing Analysis — UEs per RB Distribution
 % Histogram shows how often multiple UEs share the same RB in DL slots.
 
 if enableTraces

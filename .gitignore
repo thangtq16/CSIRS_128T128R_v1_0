@@ -34,3 +34,10 @@ node_modules/
 *.log
 *.bak
 *.tmp
+
+% --- Các file report ---
+*.pdf
+*.docx
+*.xlsx
+*.mat
+*.csv

@@ -337,7 +337,16 @@ classdef nrScheduler < handle & comm.internal.ConfigBase
                 eligibleUEContext = ueContext(rnti);
                 carrierContext = eligibleUEContext.ComponentCarrier(1);
                 csiMeasurement = carrierContext.CSIMeasurementDL;
-                csiMeasurementCQI = csiMeasurement.CSIRS.CQI*cqiSizeArray;
+                % ThangTQ23_128T128R_Rel19 Phase 4b: CQI may be a [1×numRBs]
+                % row vector (subband mode) or a scalar (wideband mode).
+                % Wideband: replicate scalar across all RBs via cqiSizeArray.
+                % Subband:  use the per-RB vector directly (already numRBs long).
+                cqi_raw = csiMeasurement.CSIRS.CQI;
+                if isscalar(cqi_raw)
+                    csiMeasurementCQI = cqi_raw * cqiSizeArray;  % [numRBs × 1]
+                else
+                    csiMeasurementCQI = cqi_raw(:);               % ensure column [numRBs × 1]
+                end
                 channelQuality(rnti, :) = csiMeasurementCQI;
                 if isempty(carrierContext.CSIRSConfiguration)
                     numCSIRSPorts = obj.CellConfig(1).NumTransmitAntennas;
