@@ -254,11 +254,12 @@ classdef nrComponentCarrierContext < handle
                 obj.CSIMeasurementDL.CSIRS.PMISet.i1 = channelQualityInfo.PMISet.i1;
                 obj.CSIMeasurementDL.CSIRS.W = channelQualityInfo.W;
             end
-            % ThangTQ23 fix: do NOT reset MCSOffset here.
-            % OLLA accumulates MCSOffset via HARQ ACK/NACK (StepUp/StepDown)
-            % across the entire simulation. Resetting on every CSI report
-            % (every 5 ms) wiped the accumulated offset and caused BLER ~60%.
-            % Initialisation is already handled in the constructor.
+            if ~isempty(schedulerConfig.LinkAdaptationConfigDL)
+                % Reset MCS offset to InitialOffset on each CSI report
+                % (by design per getMCSIndexOffset step 3 — each CSI period
+                % is an independent OLLA window with fresh CQI measurements).
+                obj.MCSOffset(1) = schedulerConfig.LinkAdaptationConfigDL.InitialOffset;
+            end
         end
 
         function updateChannelQualityUL(obj, channelQualityInfo, schedulerConfig)
