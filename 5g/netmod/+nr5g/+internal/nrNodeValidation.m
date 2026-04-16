@@ -279,7 +279,14 @@ classdef nrNodeValidation
                 csiReportConfig.ParameterCombination       = 1;
                 csiReportConfig.SubbandAmplitude           = false;    % wideband amplitude
                 csiReportConfig.NumberOfPMISubbandsPerCQISubband = 1;
-                csiReportConfig.RIRestriction              = [1 1 1 1]; % rank 1–4
+                csiReportConfig.RIRestriction              = [1 1 0 0]; % ThangTQ23_128T128R_Rel19: restrict rank ≤ 2
+                % Rationale (TS 38.214 §5.2.2.2.5a, L=2 basis beams, Panel [1×16×4]):
+                % W spans a 4D subspace (2 beams × 2 polarizations). Two rank-4 matrices
+                % in the same 4D subspace are identical → W1'*W2 = I → semi-orthogonality
+                % check always fails → MU-MIMO pairing degenerates. With rank ≤ 2, two
+                % distinct W matrices CAN be orthogonal within the same 4D subspace, so
+                % MU-MIMO pairing is effective. This maps to ri-RestrictionSet in 3GPP
+                % RRC CSI-ReportConfig (TS 38.331 §6.3.2).
             elseif connConfig.CSIReportType == 1
                 % Applicable for CSI type-I report
                 csiReportConfig.CodebookType = 'Type1SinglePanel';
@@ -304,12 +311,34 @@ classdef nrNodeValidation
             end
 
             if ~isempty(connConfig.CSIRSConfiguration)
-                % Set wideband measurement CSI-RS configuration on the full bandwidth
+                % Set CSI-RS configuration on the full bandwidth
                 csiReportConfig.NStartBWP = 0;
                 csiReportConfig.NSizeBWP = connConfig.NumResourceBlocks;
-                csiReportConfig.CQIMode = 'Wideband';
-                csiReportConfig.PMIMode = 'Wideband';
-                csiReportConfig.PRGSize = [];
+                % ThangTQ23_128T128R_Rel19 Phase 4/4b: PMI/CQI mode for 128T.
+                % connConfig.PMICQIMode is injected by nrGNB.connectUE from
+                % gNB.PMICQIMode (set in the main script via pmiCQIMode flag).
+                %   'Subband'  → per-subband PMI + per-subband CQI (Phase 4b)
+                %   'Wideband' → single PMI + single CQI (fast baseline)
+                use128TSubband = is128T && isfield(connConfig,'PMICQIMode') && ...
+                                 strcmpi(connConfig.PMICQIMode, 'Subband');
+                if use128TSubband
+                    csiReportConfig.CQIMode = 'Subband';  % per-subband CQI
+                    csiReportConfig.PMIMode = 'Subband';  % per-subband precoder W
+                    csiReportConfig.PRGSize = 4;           % PRG = PMI subband = 4 RBs (TS 38.214 Table 5.2.1.4-2, NRB∈[24,72])
+                    % SubbandSize required by nrRISelect public validation when PMIMode='Subband'.
+                    nrb = connConfig.NumResourceBlocks;
+                    if nrb >= 145
+                        csiReportConfig.SubbandSize = 16;
+                    elseif nrb >= 73
+                        csiReportConfig.SubbandSize = 8;
+                    else
+                        csiReportConfig.SubbandSize = 4;  % NRB∈[24,72]
+                    end
+                else
+                    csiReportConfig.CQIMode = 'Wideband';
+                    csiReportConfig.PMIMode = 'Wideband';
+                    csiReportConfig.PRGSize = [];
+                end
                 csiReportConfig.CodebookMode = 1;
                 csiReportConfig.CodebookSubsetRestriction = [];
                 csiReportConfig.i2Restriction = [];
@@ -550,7 +579,8 @@ classdef nrNodeValidation
                 % Validate fields
                 switch char(name)
                     case 'MaxNumUsersPaired'
-                        validateattributes(value, {'numeric'}, {'nonempty', 'scalar', 'integer', '>=', 2, '<=', 4}, 'MaxNumUsersPaired', 'MaxNumUsersPaired');
+                        % ThangTQ23_128T128R: upper limit raised to 64 (128T supports many spatial streams)
+                        validateattributes(value, {'numeric'}, {'nonempty', 'scalar', 'integer', '>=', 2, '<=', 64}, 'MaxNumUsersPaired', 'MaxNumUsersPaired');
                     case 'SemiOrthogonalityFactor'
                         validateattributes(value, {'numeric'}, {'nonempty', 'scalar', '>=', 0, '<=', 1}, 'SemiOrthogonalityFactor', 'SemiOrthogonalityFactor');
                     case 'MinNumRBs'
@@ -559,7 +589,8 @@ classdef nrNodeValidation
                     case 'MinCQI'
                         validateattributes(value, {'numeric'}, {'nonempty', 'scalar', 'integer', '>=', 1, '<=', 15}, 'MinCQI', 'MinCQI');
                     case 'MaxNumLayers'
-                        validateattributes(value, {'numeric'}, {'nonempty', 'scalar', 'integer', '>=', 2, '<=', 16}, 'MaxNumLayers', 'MaxNumLayers');
+                        % ThangTQ23_128T128R: upper limit raised to 128 (128T can support up to 128 spatial layers)
+                        validateattributes(value, {'numeric'}, {'nonempty', 'scalar', 'integer', '>=', 2, '<=', 128}, 'MaxNumLayers', 'MaxNumLayers');
                     case 'MinSINR'
                         validateattributes(value, {'numeric'}, {'nonempty', 'scalar', 'real', '>=', -7, '<=', 25}, 'MinSINR', 'MinSINR');
                     otherwise

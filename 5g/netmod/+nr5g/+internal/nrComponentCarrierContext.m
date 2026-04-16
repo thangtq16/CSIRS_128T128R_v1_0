@@ -201,7 +201,19 @@ classdef nrComponentCarrierContext < handle
                     numCSIRSPorts = cellConfig.NumTransmitAntennas;
                 end
 
-                obj.PrecodingGranularity = cellConfig.NumResourceBlocks;
+                % ThangTQ23_128T128R_Rel19 Phase 4/4b: PrecodingGranularity depends on
+                % whether subband PMI is active. Use CSIReportConfiguration.PMIMode
+                % (set by nrNodeValidation from the pmiCQIMode flag) so wideband and
+                % subband modes are both supported without hardcoding.
+                useSubbandPRG = isfield(param, 'CSIReportConfiguration') && ...
+                                ~isempty(param.CSIReportConfiguration) && ...
+                                isfield(param.CSIReportConfiguration, 'PMIMode') && ...
+                                strcmpi(param.CSIReportConfiguration.PMIMode, 'Subband');
+                if useSubbandPRG
+                    obj.PrecodingGranularity = 4; % PMI subband size = 4 RBs (TS 38.214 Table 5.2.1.4-2, NRB∈[24,72])
+                else
+                    obj.PrecodingGranularity = cellConfig.NumResourceBlocks; % wideband: 1 PRG = full BW
+                end
                 % CSI measurements initialization (DL and UL)
                 initialRank = 1; % Initial ranks for UEs
                 wp = ones(numCSIRSPorts, 1)./sqrt(numCSIRSPorts);
@@ -242,10 +254,12 @@ classdef nrComponentCarrierContext < handle
                 obj.CSIMeasurementDL.CSIRS.PMISet.i1 = channelQualityInfo.PMISet.i1;
                 obj.CSIMeasurementDL.CSIRS.W = channelQualityInfo.W;
             end
-            if ~isempty(schedulerConfig.LinkAdaptationConfigDL)
-                % Reset link adaptation MCS offset value to initial offset
-                obj.MCSOffset(1) = schedulerConfig.LinkAdaptationConfigDL.InitialOffset;
-            end
+            % State 3: do NOT reset MCSOffset on CSI report.
+            % MU-MIMO CQI is measured SU (no paired-UE interference) → always
+            % overestimates actual SINR. Resetting every CSI period (10 slots)
+            % prevents OLLA from accumulating enough offset to compensate the
+            % SU-vs-MU gap. Let OLLA accumulate via HARQ ACK/NACK across the
+            % full simulation until it reaches steady-state (~10% BLER target).
         end
 
         function updateChannelQualityUL(obj, channelQualityInfo, schedulerConfig)

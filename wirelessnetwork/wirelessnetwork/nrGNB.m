@@ -290,6 +290,14 @@ classdef nrGNB < wirelessnetwork.internal.nrNode
         %CQITable CQI table (TS 38.214 - Table 5.2.2.1-3) used for channel quality measurements
         CQITable = 'table2';
 
+        %PMICQIMode PMI and CQI reporting mode for 128T eTypeII-r19 codebook.
+        %   'Wideband' — single precoder + single CQI across the full bandwidth.
+        %                Faster simulation; suitable for quick sweeps.
+        %   'Subband'  — per-subband precoder (PMI) and per-subband CQI.
+        %                Best frequency-selective accuracy; higher compute cost.
+        %   Default: 'Subband'.
+        PMICQIMode (1,1) string {mustBeMember(PMICQIMode, ["Wideband","Subband"])} = "Subband";
+
         %InitialMCSIndexUL Initial MCS index for UL
         InitialMCSIndexUL = 0;
 
@@ -625,13 +633,21 @@ classdef nrGNB < wirelessnetwork.internal.nrNode
             % SRS resource periodicity and valid for the given number of connected UEs
             validSet = validSRSPeriodicity(validSRSPeriodicity>=minSRSPeriodicityForGivenUEs & ~mod(validSRSPeriodicity,srsResourcePeriodicity));
             if totalConnectedUEs > maxUEWithSRSPeriodicity
-                % SRS periodicity must be one of the elements in the validSet
-                messageString = ".";
+                % ThangTQ23_128T128R: relaxed from hard error to warning so that
+                % large-scale (128–512 UE) simulations can proceed.  The required
+                % SRSPeriodicityUE = ceil(numUEs/16) * srsResourcePeriodicity.
+                % E.g. 64 UE → 20 slots, 128 UE → 40 slots, 512 UE → 160 slots.
                 if ~isempty(validSet)
                     formattedValidSRSSetStr = [sprintf('{') (sprintf(repmat('%d, ', 1, length(validSet)-1)', validSet(1:end-1) )) sprintf('%d}', validSet(end))];
-                    messageString = " or increase the SRS periodicity to one of these values: " + formattedValidSRSSetStr + ".";
+                    warning('nr5g:nrGNB:SRSPeriodicityTooLow', ...
+                        ['SRSPeriodicityUE=%d slots is too low for %d UEs (max=%d). ' ...
+                         'Set gNB.SRSPeriodicityUE to one of %s for correct SRS scheduling.'], ...
+                        obj.SRSPeriodicityUE, totalConnectedUEs, maxUEWithSRSPeriodicity, formattedValidSRSSetStr);
+                else
+                    warning('nr5g:nrGNB:SRSPeriodicityTooLow', ...
+                        'SRSPeriodicityUE=%d slots is too low for %d UEs (max=%d). Increase SRSPeriodicityUE.', ...
+                        obj.SRSPeriodicityUE, totalConnectedUEs, maxUEWithSRSPeriodicity);
                 end
-                coder.internal.error('nr5g:nrGNB:InvalidNumUEWithSRSPeriodicityUE',maxUEWithSRSPeriodicity,obj.SRSPeriodicityUE,messageString);
             end
 
             connectionConfigStruct = struct('RNTI', 0, 'GNBID', obj.ID, 'GNBName', ...
@@ -759,6 +775,7 @@ classdef nrGNB < wirelessnetwork.internal.nrNode
                 connectionConfig.NumReceiveAntennas = UE(i).NumReceiveAntennas;
                 connectionConfig.CSIRSConfiguration = csirsConfig;
                 connectionConfig.CSIReportType = obj.CSIReportType;
+                connectionConfig.PMICQIMode = char(obj.PMICQIMode); % ThangTQ23_128T128R_Rel19: pass mode to nrNodeValidation
 
                 % Remove the CSIRSConfig field from connectionConfig
                 if isfield(connectionConfig, 'CSIRSConfig')
