@@ -332,7 +332,7 @@ class MatlabEnvAdapter:
             if got == "TTI_OBS":
                 hint = (
                     " MATLAB is using the old protocol. "
-                    "Set drlScheduler.TrainingMode = true; in MU_MIMO.m before connecting."
+                    "Set drlScheduler.TrainingMode = true; in CSIRS_32T32R_SOCKET.m before connecting."
                 )
             raise RuntimeError(
                 f"[MatlabEnv] Expected TTI_START, got: {got}.{hint}"

@@ -120,7 +120,7 @@ classdef nrDRLScheduler < nrScheduler
         % regardless of whether SchedulerStrategy==1 (PFS) is active.
         TrainingTputEMA = []   % initialised lazily (MaxUEs x 1)
 
-        %UEList nrUE array — set externally (MU_MIMO.m) after connectUE().
+        %UEList nrUE array — set externally (CSIRS_32T32R_SOCKET.m) after connectUE().
         % Required for ActualTputEMA: reads MAC.ReceivedBytes per UE per TTI.
         UEList = []
 
