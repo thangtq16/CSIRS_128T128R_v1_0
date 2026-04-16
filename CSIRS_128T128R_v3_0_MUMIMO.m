@@ -24,7 +24,7 @@ wirelessnetworkSupportPackageCheck
 pmiCQIMode = "Subband";   % <-- change to "Wideband" for faster runs
 
 rng("default")
-numFrameSimulation = 50;
+numFrameSimulation = 5;
 networkSimulator   = wirelessNetworkSimulator.init;
 
 %% 2. gNB Configuration

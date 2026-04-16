@@ -314,11 +314,12 @@ classdef nrDRLScheduler < nrScheduler
             % DRL MOD: Check if this slot is reserved for CSI-RS. If so, skip DRL scheduling.
             isCSIRSSlot = false;
             csirsConfig = obj.UEContext(1).ComponentCarrier(1).CSIRSConfiguration;
-            if ~isempty(csirsConfig) && isnumeric(csirsConfig.CSIRSPeriod)
+            if ~isempty(csirsConfig) && isnumeric(csirsConfig(1).CSIRSPeriod)
                 slotNum = timeFrequencyResource.NSlot;
                 frameNum = timeFrequencyResource.NFrame;
                 numSlotsFrame = obj.CellConfig(1).NumSlotsFrame;
-                if mod(numSlotsFrame*frameNum + slotNum - csirsConfig.CSIRSPeriod(2), csirsConfig.CSIRSPeriod(1)) == 0
+                period = csirsConfig(1).CSIRSPeriod;
+                if mod(numSlotsFrame*frameNum + slotNum - period(2), period(1)) == 0
                     isCSIRSSlot = true;
                 end
             end
@@ -1228,27 +1229,41 @@ classdef nrDRLScheduler < nrScheduler
             [~, WprgMap, sb_cqi_all, rank_all, buffer_all, ~, wb_cqi_all, i1_all] = ...
                 obj.buildTrainingFeatureMatrix(eligibleUEs, numRBGs, rbgSize, numSubbandsFeat, numRBs);
             
-            % Instantaneous DL throughput from previous slot (Mbps)
+            % ── Instantaneous DL throughput + ActualTputEMA update ───────────
+            % inst_tp_all(rnti): delta(MAC.ReceivedBytes) / slot_s [Mbps]
+            % ActualTputEMA(rnti): exponential moving average with same window
+            % as PFSWindowSize (alpha = 1/PFSWindowSize), used as fR in obs.
             if isempty(obj.PrevRxBytes) || numel(obj.PrevRxBytes) ~= obj.MaxUEs
                 obj.PrevRxBytes = zeros(obj.MaxUEs, 1);
             end
-            inst_tp_all = 1e-6*ones(1, obj.MaxUEs); % [Mbps], indexed by RNTI
-            slot_s = obj.CellConfig(1).SlotDuration * 1e-3; % Slot duration in seconds
+            if isempty(obj.ActualTputEMA) || numel(obj.ActualTputEMA) ~= obj.MaxUEs
+                obj.ActualTputEMA = zeros(obj.MaxUEs, 1);
+            end
+
+            inst_tp_all = zeros(1, obj.MaxUEs);   % [Mbps], indexed by RNTI
+            slot_s = obj.CellConfig(1).SlotDuration * 1e-3;
+
+            % EMA alpha: mirror PFSWindowSize (default 20 slots → α = 1/20 = 0.05)
+            pfsWindow = obj.SchedulerConfig.PFSWindowSize;
+            if isempty(pfsWindow) || pfsWindow <= 0, pfsWindow = 20; end
+            alpha = 1.0 / pfsWindow;
+
             if ~isempty(obj.UEList)
                 for ueIdx = 1:numel(obj.UEList)
                     ue   = obj.UEList(ueIdx);
                     rnti = ue.RNTI;
-                    if rnti < 1 || rnti > obj.MaxUEs
-                        continue;
-                    end
+                    if rnti < 1 || rnti > obj.MaxUEs, continue; end
                     try
                         rxBytes = statistics(ue).MAC.ReceivedBytes;
                     catch
                         continue;
                     end
                     deltaBytes = max(rxBytes - obj.PrevRxBytes(rnti), 0);
-                    inst_tp_all(rnti) = deltaBytes * 8 / 1e6 / slot_s;
-                    obj.PrevRxBytes(rnti) = rxBytes;
+                    inst_mbps  = deltaBytes * 8 / 1e6 / slot_s;
+                    inst_tp_all(rnti)       = inst_mbps;
+                    obj.PrevRxBytes(rnti)   = rxBytes;
+                    % EMA update: R̄(t) = (1-α)·R̄(t-1) + α·r(t)
+                    obj.ActualTputEMA(rnti) = (1 - alpha) * obj.ActualTputEMA(rnti) + alpha * inst_mbps;
                 end
             end
 
@@ -1315,9 +1330,12 @@ classdef nrDRLScheduler < nrScheduler
             % DRL MOD: Update CSI_Available flag
             % ----------------------------------------------------------
             fprintf("wb_cqi_all: %s\n",mat2str(wb_cqi_all));
+            % CSI_Available: true when ALL eligible UEs have reported a non-zero CQI.
+            % wb_cqi_all default = 0 (no CSI); any real report has CQI >= 1.
             if ~obj.CSI_Available
-                if sum(wb_cqi_all)~=obj.MaxUEs
+                if all(wb_cqi_all(eligibleUEs) > 0)
                     obj.CSI_Available = true;
+                    fprintf('[nrDRLScheduler] CSI available — all %d eligible UEs reported CQI\n', numel(eligibleUEs));
                 end
             end
 
@@ -1356,14 +1374,14 @@ classdef nrDRLScheduler < nrScheduler
                 'n_layers',       obj.NumLayers, ...
                 'n_rbg',          numRBGs, ...
                 'buf',            {num2cell(double(buffer_all))}, ...
-                'avg_tp',         {num2cell(double(inst_tp_all))}, ...
+                'avg_tp',         {num2cell(double(obj.ActualTputEMA(:).'))}, ...
                 'ue_rank',        {num2cell(double(rank_all))}, ...
                 'wb_cqi',         {num2cell(double(wb_cqi_all))}, ...
                 'curr_mcs',       {num2cell(double(curr_mcs_all))}, ...
                 'sub_cqi',        {sb_cqi_cell}, ...
                 'max_cross_corr', {cross_corr_cell}, ...
                 'orthogonality_corr_threshold', 1 - obj.SemiOrthogonalityFactor, ...
-                'eligible_ues',   {num2cell(double(eligibleUEs))},...
+                'eligible_ues',   {num2cell(double(eligibleUEs - 1))},...
                 'occupied_rbgs', {num2cell(double(rbgOccupancyBitmap(:)'))},...
                 'max_users_tti',  maxUsersPerTTI, ...
                 'ue_i1',          {ue_i1_cell}, ...
@@ -1427,7 +1445,7 @@ classdef nrDRLScheduler < nrScheduler
             buffers  = zeros(obj.MaxUEs, 1);
             avg_tp_bps  = zeros(obj.MaxUEs, 1);   % UEsServedDataRate DL [bps]
             wb_cqi_raw  = zeros(obj.MaxUEs, 1);   % wideband CQI [0-15]
-            i1_all      = -1 * ones(obj.MaxUEs, 2); % Array to store i1 [i11, i12, i13] per UE
+            i1_all      = -1 * ones(obj.MaxUEs, 3); % eTypeII i1=[i11, i12, i1_lc] per UE
 
             CQI_TO_SE = [0.0000,0.1523,0.2344,0.3770,0.6016,0.8770,1.1758,1.4766, ...
                          1.9141,2.4063,2.7305,3.3223,3.9023,4.5234,5.1152,5.5547];
@@ -1456,7 +1474,7 @@ classdef nrDRLScheduler < nrScheduler
                 buffers(rnti)     = ueCtx.BufferStatusDL;
                 
                 if ~isempty(i1_vals)
-                    numI1 = min(2, length(i1_vals));
+                    numI1 = min(3, length(i1_vals));
                     i1_all(rnti, 1:numI1) = i1_vals(1:numI1);
                 end
 
@@ -1553,21 +1571,37 @@ classdef nrDRLScheduler < nrScheduler
             end
             if isfield(csi, 'PMISet') && isfield(csi.PMISet, 'i1')
                 i1_vals = csi.PMISet.i1;
+                % DEBUG: print i1 structure once per UE when CSI first arrives.
+                % Remove or gate behind DRLDebug once i1 layout is confirmed.
+                if ~isempty(i1_vals)
+                    fprintf('[i1-DEBUG] UE%2d: i1=%s  numel=%d\n', ...
+                        rnti, mat2str(i1_vals(:).'), numel(i1_vals));
+                end
             end
             if isfield(csi, 'CQI') && ~isempty(csi.CQI)
-                raw = csi.CQI;
+                raw = double(csi.CQI);
                 if isscalar(raw)
-                    wbCQI = raw;
+                    % Wideband mode: single CQI value
+                    wbCQI      = raw;
                     sbCQI_feat = ones(1, numSubbandsFeat) * raw;
                 else
-                    wbCQI = mean(raw(:));
-                    tmp = raw(:).';
-                    if numel(tmp) ~= numSubbandsFeat
-                        % Resample to numSubbandsFeat (nearest-neighbour)
-                        xi  = linspace(1, numel(tmp), numSubbandsFeat);
-                        tmp = interp1(1:numel(tmp), double(tmp), xi, 'nearest');
+                    % Subband mode: csi.CQI can be [RI × numSubbands] or [numSubbands × 1].
+                    % Always reduce to [1 × numSubbands] by averaging across the RI dimension
+                    % (rows) before computing wideband mean or resampling.
+                    % This prevents raw(:) from folding RI values into the subband axis.
+                    if size(raw, 1) > 1
+                        raw = mean(raw, 1);   % [RI × numSubbands] → [1 × numSubbands]
                     end
-                    sbCQI_feat = tmp;
+                    raw = raw(:).';           % guarantee row vector [1 × numSubbands]
+
+                    wbCQI = mean(raw);        % wideband CQI = mean over subbands
+
+                    if numel(raw) ~= numSubbandsFeat
+                        % Resample numSubbands → numSubbandsFeat (= numRBGs) nearest-neighbour
+                        xi        = linspace(1, numel(raw), numSubbandsFeat);
+                        raw       = interp1(1:numel(raw), raw, xi, 'nearest');
+                    end
+                    sbCQI_feat = raw;
                 end
             end
             wbCQI = min(max(round(wbCQI), 0), 15);
