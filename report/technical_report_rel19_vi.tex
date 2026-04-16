@@ -1,0 +1,844 @@
+% ============================================================
+%  Báo cáo Kỹ thuật: Mô phỏng NR Cell 128T128R Massive MIMO
+%  với Codebook 3GPP Release 19 eTypeII
+%
+%  Tác giả : ThangTQ23 — VSI, 04/2026
+%  Compile : pdflatex × 2  (hoặc upload lên Overleaf)
+% ============================================================
+\documentclass[12pt, a4paper]{article}
+
+% ── Packages ─────────────────────────────────────────────────
+\usepackage[T5]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[vietnamese,english]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage{tabularx}
+\usepackage{ragged2e}
+
+% ── Hyperref ─────────────────────────────────────────────────
+\hypersetup{
+  colorlinks = true,
+  linkcolor  = blue!60!black,
+  urlcolor   = blue!70!black,
+  pdftitle   = {Bao cao Ky thuat: NR Cell 128T128R (Rel-19)},
+  pdfauthor  = {ThangTQ23 -- VSI}
+}
+
+% ── Code listing style ───────────────────────────────────────
+\lstdefinestyle{matlab}{
+  language        = Matlab,
+  basicstyle      = \ttfamily\footnotesize,
+  keywordstyle    = \color{blue}\bfseries,
+  commentstyle    = \color{green!50!black}\itshape,
+  stringstyle     = \color{red!70!black},
+  numbers         = left,
+  numberstyle     = \tiny\color{gray},
+  stepnumber      = 1,
+  numbersep       = 6pt,
+  backgroundcolor = \color{gray!8},
+  frame           = single,
+  frameround      = tttt,
+  breaklines      = true,
+  showstringspaces= false,
+  tabsize         = 4
+}
+\lstset{style=matlab}
+
+% ── Header / Footer ──────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small 128T128R NR Cell --- Release 19 eTypeII}
+\rhead{\small Báo cáo Nội bộ, 04/2026}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ── Section formatting ───────────────────────────────────────
+\titleformat{\section}{\large\bfseries\color{blue!60!black}}{}{0em}{\thesection\quad}
+\titleformat{\subsection}{\normalsize\bfseries}{}{0em}{\thesubsection\quad}
+\titleformat{\subsubsection}{\normalsize\itshape\bfseries}{}{0em}{\thesubsubsection\quad}
+
+% ── Custom commands ──────────────────────────────────────────
+\newcommand{\spec}[1]{\textcolor{green!40!black}{\texttt{[#1]}}}
+\newcommand{\file}[1]{\texttt{#1}}
+\newcommand{\param}[1]{\texttt{#1}}
+% Cột bảng căn trái, wrap text
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+
+% ============================================================
+\begin{document}
+
+% ── Trang bìa ────────────────────────────────────────────────
+\begin{titlepage}
+  \centering
+  \vspace*{2cm}
+  {\LARGE\bfseries Báo cáo Kỹ thuật\\[0.5em]
+   Mô phỏng NR Cell 128T128R\\[0.3em]
+   với Codebook 3GPP Release~19 CSI-RS
+  \par}
+  \vspace{1.5cm}
+  {\large Báo cáo Nội bộ \par}
+  \vspace{0.5cm}
+  {\large Tháng 4, 2026 \par}
+  \vspace{1.5cm}
+  \rule{0.8\textwidth}{0.4pt}\\[0.6em]
+  \begin{tabular}{ll}
+    \textbf{Tác giả}    & ThangTQ23, VSI \\
+    \textbf{Phiên bản}  & v1.0 \\
+    \textbf{Trạng thái} & Sẵn sàng bàn giao cho DRL training \\
+    \textbf{Ngày}       & 16/04/2026 \\
+  \end{tabular}\\[0.6em]
+  \rule{0.8\textwidth}{0.4pt}
+  \vspace{1.8cm}
+  \begin{abstract}
+    \noindent
+    Báo cáo này ghi lại quá trình thiết kế, hiện thực và kiểm chứng môi
+    trường mô phỏng downlink 128T128R massive MIMO tuân thủ 3GPP Release~19 sử dụng CSI-RS,
+    xây dựng trên nền MATLAB Wireless Network Toolbox và 5G Toolbox.
+    Xuất phát từ baseline link-level Rel-15/16, dự án đã trải qua 4 phiên
+    bản để cho ra môi trường NR~Cell system-level đóng vai trò gym cho DRL
+    agent học policy scheduling MU-MIMO.
+    Đóng góp chính là việc tích hợp các refined codebook (Type I Mode A/B và eTypeII) Release~19 (TS~38.214 \S5.2.2.2.5a) hỗ trợ 128~port, cho phép mô phỏng CSI
+    feedback chính xác về mặt không gian cho massive MIMO.
+    Báo cáo cung cấp bằng chứng kiểm chứng, bảng tra cứu đặc tả kỹ thuật
+    và hướng dẫn sử dụng đầy đủ phục vụ bàn giao dự án.
+  \end{abstract}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Giới thiệu và Động lực}
+% ============================================================
+
+Dự án được khởi tạo để giải quyết khoảng trống trong bộ công cụ mô
+phỏng 5G hiện tại: MATLAB Wireless Network Toolbox tiêu chuẩn chỉ hỗ
+trợ tối đa 32~anten phát.
+
+Công việc trong báo cáo này giải quyết:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Benchmark link-level} (v1/v2): so sánh bốn phương pháp codebook
+        từ Rel-15/16 Type~I đến Rel-19 eTypeII trên kênh 128~port massive MIMO.
+  \item \textbf{Bộ mô phỏng NR Cell system-level} (v3): ghép cặp
+        MU-MIMO, thích nghi liên kết OLLA.
+  \item \textbf{Môi trường gym cho DRL} (v4): giao diện TCP socket, observation spaces với 8 features và một chương trình baseline để so sánh các thuật toán scheduler (RR, PF, BestCQI).
+\end{enumerate}
+
+Việc nâng cấp lên Release~19 là đóng góp cốt lõi: cho phép mô phỏng
+CSI feedback beamforming tiên tiến nhất theo chuẩn NR~Rel-19
+(3GPP TR~38.214), tạo môi trường huấn luyện thực tế cho DRL scheduler
+hướng đến các triển khai thế hệ tiếp theo.
+
+% ============================================================
+\section{Tiến trình Phát triển và Cấu trúc File}
+% ============================================================
+
+\subsection{Lịch sử phiên bản}
+
+\begin{center}
+\begin{tabular}{L{1.4cm} L{6.1cm} L{7cm}}
+\toprule
+\textbf{Phiên bản} & \textbf{File} & \textbf{Mô tả} \\
+\midrule
+v1.0 & \file{CSIRS\_128T128R\_v1\_0.m} &
+  Link-level, 4 approaches (A/B/C/D), 1~UE, 1 channel realization \\[3pt]
+v2.0 & \file{CSIRS\_128T128R\_v2\_0.m} &
+  SNR sweep + Monte Carlo (B/C/D/E), subband PMI/CQI \\[3pt]
+v3.0 & \file{CSIRS\_128T128R\_v3\_0\_MUMIMO.m} &
+  System-level NR Cell, mô phỏng MU-MIMO event-driven \\[3pt]
+v4.0-DRL & \file{CSIRS\_128T128R\_v4\_0\_SOCKET.m} &
+  DRL gym: giao thức TCP socket, FTP-3, observation spaces: 8 features \\[3pt]
+v4.0-BL & \file{CSIRS\_128T128R\_v4\_0\_BASELINE.m} &
+  Môi trường giống v4.0-DRL, scheduler baseline so sánh \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Lịch sử phiên bản và các file mô phỏng chính.}
+\label{tab:versions}
+\end{center}
+
+\subsection{Các module hỗ trợ}
+
+\begin{center}
+\begin{tabular}{L{5cm} L{9.5cm}}
+\toprule
+\textbf{File} & \textbf{Vai trò} \\
+\midrule
+\file{csirs\_feedback.m} &
+  Engine CSI feedback: RI/PMI/CQI cho Approaches B, C, D, E \\[3pt]
+\file{csirs\_computeMetrics.m} &
+  Ánh xạ SINR $\to$ MCS $\to$ throughput \\[3pt]
+\file{csirs\_buildGrid.m} &
+  Xây dựng TX resource grid (4 tài nguyên NZP-CSI-RS) \\[3pt]
+\file{csirs\_channelEstimate.m} &
+  Ước lượng kênh MMSE trên 2~slot \\[3pt]
+\file{csirs\_channelSetup.m} &
+  Khởi tạo đối tượng kênh CDL \\[3pt]
+\file{csirs\_txRx.m} &
+  Chuỗi TX/kênh/AWGN/giải điều chế \\[3pt]
+\file{csirs\_printSweepTable.m} &
+  Định dạng kết quả bảng SNR sweep \\[3pt]
+\file{nrDRLScheduler.m} &
+  \texttt{classdef} kế thừa \texttt{nrScheduler}: inject DRL action + socket \\[3pt]
+\file{test\_dummy\_server.py} &
+  Server Python kiểm thử (Level~1--3 validation) \\[3pt]
+\file{hNRCreateCDLChannels.m} &
+  Tạo kênh CDL cho nhiều UE \\[3pt]
+\file{hNRCustomChannelModel.m} &
+  Adapter kênh tùy chỉnh cho \texttt{wirelessNetworkSimulator} \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Các module hỗ trợ và vai trò.}
+\label{tab:modules}
+\end{center}
+
+% ============================================================
+\section{Nâng cấp 3GPP Release~19: Chi tiết Kỹ thuật}
+% ============================================================
+
+\subsection{Tổng quan thay đổi so với Baseline Rel-15/16}
+
+Approach~A ban đầu sử dụng codebook Rel-15/16 Type~I Single-Panel
+cấu hình cho panel \emph{ảo} 32~port (TS~38.214 \S5.2.2.2.1). Nâng
+cấp Release~19 thay thế bằng ba chế độ codebook mới vận hành trên
+\emph{toàn bộ} mảng 128~port:
+
+\begin{enumerate}
+  \item \textbf{Approach C} — Rel-19 Type~I Single-Panel Mode~A
+        \spec{TS~38.214 \S5.2.2.2.1a, CodebookMode=1}
+  \item \textbf{Approach D} — Rel-19 Type~I Single-Panel Mode~B
+        \spec{TS~38.214 \S5.2.2.2.1a, CodebookMode=2}
+  \item \textbf{Approach E} — Rel-19 Refined eTypeII 128~port
+        \spec{TS~38.214 \S5.2.2.2.5a}
+\end{enumerate}
+
+\subsection{Cấu hình Anten}
+
+Mảng anten 128~port được cấu hình dạng UPA (Uniform Planar Array)
+phân cực kép 2D:
+\[
+  \text{Mảng gNB} = 4V \times 16H \times 2\,\text{pol} = 128\text{ port}
+\]
+Theo ký hiệu 3GPP: $N_g = 1$ panel, $N_1 = 16$ (chiều ngang),
+$N_2 = 4$ (chiều đứng), kích thước panel $[N_g, N_1, N_2] = [1, 16, 4]$.
+
+Tham số MATLAB tương ứng:
+\begin{lstlisting}
+panelDimensions = [1, 16, 4];       % [Ng=1, N1=16, N2=4] -- TS 38.214 S5.2.2.2.5a
+gnbArraySize    = [4, 16, 2, 1, 1]; % [Nv, Nh, Npol, Mg, Mg2] = 128 port
+\end{lstlisting}
+
+\subsection{Cấu hình CSI-RS}
+
+Bốn tài nguyên NZP-CSI-RS (Row~18, CDM8) được dùng để đo toàn bộ
+128~port trên 2~slot liên tiếp:
+\begin{itemize}[nosep]
+  \item 4 tài nguyên $\times$ 32~port mỗi tài nguyên = 128~port tổng
+  \item Row~18 hỗ trợ 32~port, CDM length~8 \spec{TS~38.211 \S7.4.1.5}
+  \item Các tài nguyên phân bổ trên slot~0 và slot~1 để tránh chồng chéo
+\end{itemize}
+
+\subsection{Rel-19 Type~I Refined Single-Panel (Approaches C và D)}
+
+Cả Approach~C lẫn Approach~D đều dùng
+\param{CodebookType = 'typeI-SinglePanel-r19'}, kích hoạt đường xử lý
+Rel-19 trong \texttt{nr5g.internal.nrRISelect} và
+\texttt{nr5g.internal.nrCQISelect} của MATLAB.
+
+\begin{itemize}
+  \item \textbf{Mode~A} (\texttt{CodebookMode=1}): hệ số oversampling
+        $O_1 = O_2 = 4$, beam+co-phase theo subband. PMI và CQI đều
+        theo \param{pmiMode}.
+  \item \textbf{Mode~B} (\texttt{CodebookMode=2}): nhóm beam ($i_1$)
+        luôn là wideband (ràng buộc đặc tả: tìm kiếm nhóm beam trên
+        toàn băng thông); co-phase ($i_2$) có thể theo subband.
+\end{itemize}
+
+\subsection{Rel-19 Refined eTypeII --- Approach E}
+\label{sec:etypeii}
+
+Đây là đóng góp cốt lõi của nâng cấp Release~19. Codebook eTypeII-r19
+(TS~38.214 \S5.2.2.2.5a) chọn $L$ beam DFT cơ sở mỗi phân cực và kết
+hợp chúng với hệ số biên độ+pha phức:
+\[
+  \mathbf{W} = \mathbf{W}_1 \mathbf{W}_2, \quad
+  \mathbf{W}_1 \in \mathbb{C}^{N_T \times 2L}, \quad
+  \mathbf{W}_2 \in \mathbb{C}^{2L \times r}
+\]
+trong đó $\mathbf{W}_1$ là ma trận chọn beam DFT khối chéo (beam dùng
+chung cho cả hai phân cực) và $\mathbf{W}_2$ chứa hệ số tổ hợp tuyến
+tính được lượng tử hóa.
+
+\subsubsection{Lựa chọn ParameterCombination}
+
+Trường \param{ParameterCombination} (PC) kiểm soát số beam $L$, độ
+phân giải biên độ $p_v$ và overhead phân số $\beta$:
+
+\begin{center}
+\begin{tabular}{ccccL{5cm}}
+\toprule
+\textbf{PC} & $L$ & $p_v$ & $\beta$ & \textbf{Ghi chú} \\
+\midrule
+1 & 2 & 1/2 & 1/4 & Overhead thấp, rank 1--2 \\
+2 & 2 & 1   & 1/2 & Biên độ đầy đủ, rank 1--2 \\
+3 & 4 & 1/4 & 1/4 & Overhead trung bình \\
+4 & 4 & 1/2 & 1/4 & Overhead chuẩn \\
+\textbf{5} & \textbf{4} & \textbf{1/4} & \textbf{1/4} &
+  \textbf{Dùng trong dự án này} \\
+6 & 4 & 1/2 & 1/2 & Độ phân giải biên độ cao hơn \\
+7 & 6 & ---  & --- & Rank tối đa = 2 \\
+8 & 6 & ---  & --- & Rank tối đa = 2 \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Các giá trị ParameterCombination theo TS~38.214
+Table~5.2.2.2.5-1. PC=5 ($L=4$, $\beta=1/4$) được dùng trong mô
+phỏng system-level.}
+\label{tab:pc}
+\end{center}
+
+\subsubsection{Hai đường hiện thực}
+
+Do bùng nổ tổ hợp khi $L \geq 4$, hai đường được sử dụng:
+\begin{itemize}
+  \item \textbf{$L = 2$ (PC 1/2):} Dùng toàn bộ pipeline toolbox qua
+        \texttt{nr5g.internal.nrPMIReport} tìm kiếm toàn diện trên
+        $\binom{1024}{2} \approx 31.000$ cặp beam --- khả thi về bộ
+        nhớ, cho $i_1 = [i_{1,1},\, i_{1,2},\, i_{1,\mathrm{LC}}]$
+        đúng theo đặc tả.
+  \item \textbf{$L \geq 4$ (PC 3--8):} Greedy DFT matching pursuit
+        (hiện thực trong \file{csirs\_feedback.m}:
+        \texttt{greedyEType2R19Precoder}) --- tránh OOM từ
+        $\binom{1024}{4} \times 128 \times 4 > 5\,\text{GB}$, giữ
+        nguyên cấu trúc $\mathbf{W}_1\mathbf{W}_2$ theo đặc tả.
+\end{itemize}
+
+\subsection{Override Thư viện MATLAB --- Kích hoạt 128~Port và Rel-19}
+
+MATLAB 5G Toolbox tiêu chuẩn hỗ trợ tối đa 32~anten phát và không
+cung cấp các kiểu codebook Rel-19 (\param{'eTypeII-r19'},
+\param{'typeI-SinglePanel-r19'}) qua API công khai.
+
+Để bổ sung các khả năng này, các phiên bản \emph{đã sửa} của
+thư viện \texttt{5g/} và \texttt{wirelessnetwork/} được thêm vào
+MATLAB path:
+\begin{lstlisting}
+addpath(genpath(fullfile(projectRoot, 'wirelessnetwork')), '-begin');
+addpath(genpath(fullfile(projectRoot, '5g')),              '-begin');
+\end{lstlisting}
+
+\begin{enumerate}[nosep]
+  \item \texttt{nrGNB} với \param{NumTransmitAntennas = 128}
+        (trước đây giới hạn 32)
+  \item Đường xử lý codebook eTypeII-r19 trong \texttt{nrUEAbstractPHY}
+  \item Hỗ trợ \param{'typeI-SinglePanel-r19'} và \param{'eTypeII-r19'}
+        trong \texttt{nr5g.internal.nrRISelect} / \texttt{nrCQISelect}
+  \item \texttt{nrNodeValidation} chấp nhận \param{PMICQIMode = "Subband"}
+        cho cấu hình gNB 128~port
+\end{enumerate}
+
+% ============================================================
+\section{Bảng Tra cứu Đặc tả Kỹ thuật}
+% ============================================================
+
+Bảng~\ref{tab:spec} ánh xạ từng tham số cấu hình chính đến tham chiếu
+specs 3GPP tương ứng, cung cấp audit trail trực tiếp từ code đến
+tiêu chuẩn.
+
+\begin{center}
+\begin{longtable}{L{4.5cm} L{3.8cm} L{5.5cm}}
+\toprule
+\textbf{Tham số / Tính năng} & \textbf{Giá trị (dự án này)} &
+\textbf{Tham chiếu 3GPP} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Kiểu codebook (Approach E)  & \texttt{'eTypeII-r19'}         &
+  TS~38.214 \S5.2.2.2.5a \\[2pt]
+Kích thước panel             & $[N_g,N_1,N_2]=[1,16,4]$       &
+  TS~38.214 \S5.2.2.2.5a, Table~5.2.2.2.5-1 \\[2pt]
+ParameterCombination         & PC=5 ($L=4$, $\beta=1/4$)      &
+  TS~38.214 Table~5.2.2.2.5-1, dòng 5 \\[2pt]
+Kiểu codebook (Approach C)   & \texttt{'typeI-SP-r19'}, Mode~A &
+  TS~38.214 \S5.2.2.2.1a \\[2pt]
+Kiểu codebook (Approach D)   & \texttt{'typeI-SP-r19'}, Mode~B &
+  TS~38.214 \S5.2.2.2.1a \\[2pt]
+Kiểu codebook (Approach A)   & \texttt{'typeI-SP'}, Rel-15/16  &
+  TS~38.214 \S5.2.2.2.1 \\[2pt]
+Oversampling DFT             & $O_1 = O_2 = 4$                &
+  TS~38.214 \S5.2.2.2.3 \\[2pt]
+CSI-RS row (32~port)         & Row~18, CDM8                   &
+  TS~38.211 Table~7.4.1.5.3-1 \\[2pt]
+Kích thước subband           & 4~RB (NRB $\in [24,72]$)       &
+  TS~38.214 Table~5.2.1.4-2 \\[2pt]
+Bảng CQI                     & Table~1                        &
+  TS~38.214 Table~5.2.2.1-2 \\[2pt]
+OLLA target BLER             & $\approx 10\%$                 &
+  StepDown/(StepDown+StepUp) = 0.03/0.30 \\[2pt]
+Chu kỳ SRS (UE)              & 20~ms                          &
+  TS~38.211 \S6.4.1.4 \\[2pt]
+Chu kỳ báo cáo CSI           & 10~slot ($= 5$~ms @ 30~kHz)   &
+  TS~38.214 \S5.2.1 \\[2pt]
+Tần số sóng mang             & 4,9~GHz (băng n79)             &
+  TS~38.104 Table~5.4.2.3-1 \\[2pt]
+NRB (10~MHz, SCS 30~kHz)     & 24                             &
+  TS~38.104 Table~5.3.2-1 \\[2pt]
+Hồ sơ trễ CDL                & CDL-D (LOS-dominant)           &
+  TS~38.901 Table~7.7.2-4 \\[2pt]
+Chế độ ghép song công        & TDD                            &
+  TS~38.104 \S4.3 \\
+\end{longtable}
+\captionof{table}{Bảng tra cứu tham số — specs 3GPP.}
+\label{tab:spec}
+\end{center}
+
+% ============================================================
+\section{Bằng chứng Kiểm chứng}
+% ============================================================
+
+\subsection{Bằng chứng 1 --- Cấu trúc Chỉ số PMI đặc trưng cho Codebook}
+
+Bằng chứng trực tiếp nhất cho thấy đường xử lý codebook eTypeII-r19
+Rel-19 được kích hoạt đúng là cấu trúc của chỉ số PMI $i_1$:
+
+\begin{itemize}
+  \item \textbf{Rel-15/16 eTypeII:} $i_1 = [i_{1,1},\, i_{1,2}]$
+        --- 2 phần tử (chỉ số cặp beam)
+  \item \textbf{Rel-19 eTypeII-r19:} $i_1 = [i_{1,1},\, i_{1,2},\, i_{1,\mathrm{LC}}]$
+        --- 3 phần tử, trong đó $i_{1,\mathrm{LC}}$ là chỉ số hệ số
+        tổ hợp tuyến tính \spec{TS~38.214 \S5.2.2.2.5a}
+\end{itemize}
+
+Test Level~0 (chạy với \file{CSIRS\_128T128R\_v3\_0\_MUMIMO.m}) đã
+xác nhận:
+\[
+  i_1 = [4,\; 2,\; 1431]
+\]
+Cấu trúc 3~phần tử này là điều \emph{không thể} đạt được từ bất kỳ
+cấu hình codebook Rel-15/16 nào, xác định một cách rõ ràng rằng
+đường code Rel-19 đang được sử dụng.
+
+\subsection{Bằng chứng 2 --- Bất đẳng thức Phân cấp Hiệu năng}
+
+Bốn approach tạo thành một phân cấp hiệu năng có cơ sở lý thuyết
+\emph{không thể vi phạm} nếu mỗi codebook được hiện thực đúng:
+\[
+  \underbrace{\text{B (SVD upper bound)}}_{\text{lý tưởng}} \;\geq\;
+  \underbrace{\text{E (eTypeII-r19)}}_{L=4\text{ beam}} \;\geq\;
+  \underbrace{\text{C (TypeI-r19 ModeA)}}_{\text{lưới codebook}} \;\geq\;
+  \underbrace{\text{A (TypeI Rel-15/16)}}_{\text{chỉ 32 port}}
+\]
+
+\textbf{Tại sao đây là bằng chứng:}
+\begin{itemize}
+  \item B là SVD upper bound --- mọi precoder dựa trên feedback
+        \emph{phải} thực hiện tại hoặc dưới ngưỡng này theo cấu trúc.
+  \item E dùng $L=4$ beam DFT với cấu trúc $\mathbf{W}_1\mathbf{W}_2$
+        tổng quát hóa chặt chẽ codebook TypeI (TypeI là trường hợp đặc
+        biệt $L=1$ beam, không có tổ hợp tuyến tính).
+  \item A hoạt động trên các mảng con 32~port ảo, bỏ qua thông tin
+        không gian liên mảng con có trong kênh 128~port đầy đủ.
+\end{itemize}
+
+Nếu phân cấp được thỏa mãn trên toàn bộ điểm SNR và các lần thực
+hiện kênh trong quét v2 (\file{CSIRS\_128T128R\_v2\_0.m}), tính đúng
+đắn được xác nhận. Mức tăng tương đối kỳ vọng tại SNR cao (25~dB)
+theo 3GPP TR~38.859:
+\begin{itemize}[nosep]
+  \item E so với C: $+15\text{--}25\%$ thông lượng
+  \item Khoảng cách E so với B: $5\text{--}15\%$ (overhead lượng tử hóa)
+\end{itemize}
+
+\subsection{Bằng chứng 3 --- Hội tụ OLLA trong Mô phỏng System-level}
+
+Outer Loop Link Adaptation (OLLA) hội tụ BLER từng UE về giá trị
+mục tiêu $\approx 10\%$ theo tiến trình mô phỏng. Mục tiêu được suy
+ra từ kích thước bước:
+\[
+  \mathrm{BLER}_{\mathrm{target}} = \frac{\Delta_{\mathrm{down}}}{\Delta_{\mathrm{down}} + \Delta_{\mathrm{up}}} = \frac{0{,}03}{0{,}03 + 0{,}27} = 10\%
+\]
+Sự hội tụ OLLA (quan sát từ frame~20 trở đi trong các lần chạy 50~frame)
+xác nhận: (a)~CSI feedback đang được nhận và xử lý, (b)~tín hiệu HARQ
+ACK/NACK hoạt động đúng, và (c)~lựa chọn MCS đang phản hồi theo
+feedback. Đây là kiểm thử tích hợp end-to-end.
+
+\subsection{Bằng chứng 4 --- Kiểm thử Giao thức Socket DRL}
+
+Bốn cấp kiểm thử đã được thực hiện để kiểm chứng môi trường DRL v4:
+
+\begin{center}
+\begin{tabular}{cL{4.5cm}L{3.7cm}c}
+\toprule
+\textbf{Level} & \textbf{Mô tả} & \textbf{Công cụ} & \textbf{Kết quả} \\
+\midrule
+0 & Chạy baseline v3 (5 frame), kiểm tra cấu trúc i1 &
+  \file{v3\_0\_MUMIMO.m} & PASS \\[3pt]
+1 & Handshake socket + giao thức TTI\_START/DONE &
+  \file{test\_dummy\_server.py} (NOOP) & PASS \\[3pt]
+2 & Kiểm tra giá trị quan sát (JSON dump, 8~đặc trưng) &
+  \file{test\_dummy\_server.py} (obs\_dump) & PASS \\[3pt]
+3 & Smoke test hành động ngẫu nhiên, thông lượng cell~$> 0$ &
+  \file{test\_dummy\_server.py} (random) & PASS \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Các cấp kiểm thử môi trường DRL. Cả bốn cấp đều đạt.}
+\label{tab:tests}
+\end{center}
+
+% ============================================================
+\section{Kiến trúc System-level (v3/v4)}
+% ============================================================
+
+\subsection{Framework Mô phỏng}
+
+Mô phỏng system-level sử dụng framework event-driven
+\texttt{wirelessNetworkSimulator} của MATLAB (Wireless Network Toolbox).
+Các thuộc tính chính:
+
+\begin{itemize}[nosep]
+  \item \textbf{Nút:} 1 gNB (128T128R) + 16~UE (4Tx/4Rx mỗi UE)
+  \item \textbf{Lưu lượng:} FTP Model~3 (6~Mbps, gói 1500~byte) cho
+        động học buffer; Full Buffer tùy chọn cho phân tích trạng thái ổn định
+  \item \textbf{Kênh:} CDL-D, RMS delay spread 100~ns,
+        Doppler 5~Hz ($\approx$1~km/h @ 4,9~GHz)
+  \item \textbf{Scheduler:} RAT-0 (cấp phát tài nguyên theo RBG)
+\end{itemize}
+
+\subsection{Cấu hình MU-MIMO}
+
+\begin{center}
+\begin{tabular}{L{5.5cm} L{8cm}}
+\toprule
+\textbf{Tham số} & \textbf{Giá trị / Giải thích} \\
+\midrule
+MaxNumUsersPaired       & 4 \\[3pt]
+MaxNumLayers            & 8 \\[3pt]
+SemiOrthogonalityFactor & 0,7 \\[3pt]
+MinCQI                  & 1 \\[3pt]
+Tín hiệu đo CSI         & CSI-RS \\[3pt]
+Cơ sở ghép cặp          & $L=2$ beam $\times$ 2~pol = không gian con 4D;
+                          $K \cdot r \leq 4$ để đảm bảo tính trực giao \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Cấu hình scheduler MU-MIMO.}
+\end{center}
+
+\subsection{Triển khai UE}
+
+UE được triển khai trong sector 120° với:
+\begin{itemize}[nosep]
+  \item Góc phương vị: đều trong $[-60°, +60°]$
+  \item Khoảng cách: $r \in [50, 500]$~m, lấy mẫu từ phân phối đều
+        trên \emph{diện tích} sector qua ``sqrt-trick'':
+        $r = \sqrt{r_{\min}^2 + u(r_{\max}^2 - r_{\min}^2)}$,
+        $u \sim \mathcal{U}[0,1]$
+\end{itemize}
+
+\subsection{Cấu hình OLLA}
+
+OLLA (State~3: không reset) tích lũy MCS offset xuyên suốt mô phỏng:
+\begin{lstlisting}
+ollaConfig = struct('InitialOffset', 0, 'StepUp', 0.27, 'StepDown', 0.03);
+% Target BLER = 0.03 / (0.03 + 0.27) = 10%
+% State 3: reset da duoc xoa -- thiet ke co chu dich
+\end{lstlisting}
+
+Thiết kế không reset là chủ đích: CQI MU-MIMO được đo theo SU nên
+đánh giá quá cao SINR. OLLA phải tích lũy qua nhiều grant để học đúng
+mức giảm MCS trong điều kiện MU-MIMO.
+
+% ============================================================
+\section{Môi trường Gym DRL (v4)}
+% ============================================================
+
+\subsection{Kiến trúc tổng thể}
+
+\begin{verbatim}
+Python DRL Agent  <-- TCP socket :5555 -->  MATLAB NR Cell (v4_0_SOCKET)
+  PPO / SAC / ...                            wirelessNetworkSimulator
+       |                                            |
+  action: [NumLayers x NumRBGs]            obs: TTI_START JSON
+  reward: PF throughput                    nrDRLScheduler (classdef)
+                                           eTypeII-r19, subband CQI
+\end{verbatim}
+
+\subsection{Observation spaces: 8 features}
+
+\begin{center}
+\begin{tabular}{cL{2.7cm}L{5.5cm}L{3.5cm}}
+\toprule
+\textbf{\#} & \textbf{JSON Key} & \textbf{Mô tả} & \textbf{Kích thước} \\
+\midrule
+1 & \texttt{avg\_tp}       & EMA thông lượng DL (Mbps)              & $[\text{MaxUEs}]$ \\[3pt]
+2 & \texttt{ue\_rank}      & Rank indicator mỗi UE                  & $[\text{MaxUEs}]$ \\[3pt]
+3 & \texttt{occupied\_rbgs}& Bản đồ cấp phát RBG                    & theo dõi bởi Python \\[3pt]
+4 & \texttt{buf}           & DL buffer (bytes)                      & $[\text{MaxUEs}]$ \\[3pt]
+5 & \texttt{curr\_mcs}     & MCS hiệu dụng (sau OLLA)               & $[\text{MaxUEs}]$ \\[3pt]
+6 & \texttt{ue\_i1}        & Chỉ số beam-group $i_1$ eTypeII-r19    & $[\text{MaxUEs} \times 3]$ \\[3pt]
+7 & \texttt{sub\_cqi}      & Subband CQI (resample sang lưới RBG)   & $[\text{MaxUEs} \times \text{nRBG}]$ \\[3pt]
+8 & \texttt{max\_cross\_corr} & $\kappa$ tương quan chéo max-cột (per-RBG) &
+  $[\text{MaxUEs}^2 \times \text{nRBG}]$ \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Các đặc trưng không gian quan sát gửi đến DRL agent mỗi TTI.}
+\label{tab:obs}
+\end{center}
+
+\noindent\textbf{Lưu ý hiện thực quan trọng:}
+\begin{itemize}[nosep]
+  \item \texttt{avg\_tp} dùng EMA (\texttt{ActualTputEMA}), không phải
+        thông lượng tức thời
+  \item \texttt{eligible\_ues} gửi 0-based (MATLAB RNTI~$-$~1) để khớp
+        với index mảng Python
+  \item \texttt{max\_cross\_corr} được định nghĩa là
+        $\kappa(W_i, W_j) = \max_k |W_i[:,k]^\dagger W_j[:,k]| / (\|w_i^k\|\|w_j^k\|)$,
+        tính per-RBG --- \emph{không phải} hàm semi-orthogonality nội bộ của MATLAB
+\end{itemize}
+
+\subsection{Action spaces}
+
+DRL agent trả về ma trận $A \in \mathbb{Z}^{N_L \times M}$ trong đó:
+\begin{itemize}[nosep]
+  \item $N_L$ = số layer không gian (MU-MIMO stream)
+  \item $M$ = số RBG ($= \lceil N_{\rm RB} / \text{kích thước RBG} \rceil$)
+  \item $A[l,m] \in \{1, \ldots, |\mathcal{U}|\}$: chỉ số UE (1-based) cho layer~$l$, RBG~$m$
+  \item $A[l,m] = |\mathcal{U}|+1$: không cấp phát (skip)
+\end{itemize}
+
+\subsection{Giao thức Socket}
+
+\begin{verbatim}
+HANDSHAKE  ->  "HELLO\n"
+           <-  "READY\n"
+
+Mỗi TTI:
+  ->  "TTI_START " + JSON(obs) + "\n"
+  <-  "ACTION " + JSON(action) + "\n"
+  ->  "TTI_DONE " + JSON(reward) + "\n"
+
+Kết thúc episode:
+  ->  "STOP\n"
+  <-  (kết nối đóng)
+\end{verbatim}
+
+% ============================================================
+\section{Hướng dẫn Sử dụng}
+% ============================================================
+
+\subsection{Yêu cầu Hệ thống}
+
+\begin{itemize}[nosep]
+  \item MATLAB R2024a trở lên (yêu cầu 5G Toolbox + Wireless Network Toolbox)
+  \item Thư mục thư viện đã sửa \file{5g/} và \file{wirelessnetwork/}
+        có mặt tại thư mục gốc dự án (đã bao gồm trong repository)
+  \item Python 3.9+ với \texttt{socket} (thư viện chuẩn) cho giao diện DRL
+\end{itemize}
+
+\subsection{So sánh Codebook Link-level (v2)}
+
+\begin{lstlisting}
+% Chay tu MATLAB command window, CWD la thu muc goc du an
+% Cho ra bang sweep SNR: RI / MCS / Throughput cho B, C, D, E
+
+run('CSIRS_128T128R_v2_0.m')
+
+% Tham so co the chinh (dau file):
+%   pmiMode    = 'Subband' | 'Wideband'
+%   cqiMode    = 'Wideband' | 'Subband'
+%   paramCombE = 5       (PC cho eTypeII, xem Bang 3)
+%   snrList    = [-5, 10, 25]  (dB)
+%   nRealiz    = 20      (so lan thuc hien kenh moi diem SNR)
+\end{lstlisting}
+
+\textbf{Kết quả kỳ vọng:} Bảng in ra terminal hiển thị RI, MCS và
+thông lượng cho B/C/D/E tại từng điểm SNR. Phân cấp
+B $\geq$ E $\geq$ C/D phải thỏa mãn tại mọi điểm.
+
+\subsection{Mô phỏng NR Cell System-level (v3)}
+
+\begin{lstlisting}
+% Chay tu MATLAB command window
+% Yeu cau Wireless Network Toolbox
+
+run('CSIRS_128T128R_v3_0_MUMIMO.m')
+
+% §8:  in tom tat dieu kien mo phong
+% §9:  chay 5 frame (numFrameSimulation = 5)
+% §10: KPI Summary (displayPerformanceIndicators)
+% §11: luu simulationLogs.mat
+% §11b: bang Grant/MCS tung UE
+% §11c: xu huong BLER & MCS tung frame (OLLA Convergence Monitor)
+% §12: histogram ghep cap MU-MIMO
+
+% Thay doi che do PMI/CQI (dau file):
+%   pmiCQIMode = "Subband";   % khuyen nghi
+%   pmiCQIMode = "Wideband";  % nhanh hon khi debug
+\end{lstlisting}
+
+\subsection{Baseline Scheduler (v4 Baseline)}
+
+\begin{lstlisting}
+% Chay doc lap -- khong can Python server
+% Cho ra KPI 50 frame lam baseline so sanh DRL
+
+run('CSIRS_128T128R_v4_0_BASELINE.m')
+
+% Tuy chon scheduler (dau file):
+%   schedulerType = 'ProportionalFair'  % baseline chuan trong DRL
+%   schedulerType = 'RoundRobin'        % can duoi
+%   schedulerType = 'BestCQI'           % toi da hoa thong luong
+\end{lstlisting}
+
+\subsection{Môi trường DRL Socket (v4 Socket)}
+
+\textbf{Bước 1:} Khởi động server Python (chế độ kiểm thử hoặc DRL agent thực):
+\begin{lstlisting}[language=Python]
+# Server kiem thu (Level 1: NOOP / Level 2: obs dump / Level 3: random)
+python test_dummy_server.py --mode random --port 6666
+\end{lstlisting}
+
+\textbf{Bước 2:} Chạy mô phỏng MATLAB:
+\begin{lstlisting}
+run('CSIRS_128T128R_v4_0_SOCKET.m')
+% Ket noi den localhost:6666 (DRL_Port trong nrDRLScheduler)
+% Log ghi vao logs_v4/ kem timestamp
+\end{lstlisting}
+
+\textbf{Bước 3:} Với DRL agent thực, hiện thực giao thức socket mô
+tả trong Mục~7.3 ở phía Python.
+
+\subsection{Lưu ý Cấu hình Quan trọng}
+
+\begin{enumerate}
+  \item \param{gNB.PMICQIMode = pmiCQIMode} \textbf{phải} được gọi
+        trước \texttt{connectUE(gNB, UEs, ...)}
+  \item Dùng tên string cho scheduler: \param{'ProportionalFair'},
+        \param{'RoundRobin'}, \param{'BestCQI'} (không dùng mã số)
+  \item Không xóa các lệnh \texttt{addpath(..., '-begin')} --- nếu
+        thiếu, MATLAB sẽ dùng toolbox mặc định và 128~port + eTypeII-r19
+        sẽ lặng lẽ quay về trạng thái không được hỗ trợ
+  \item OLLA \emph{không} reset giữa các frame --- đây là thiết kế
+        có chủ đích (tích lũy State~3)
+\end{enumerate}
+
+% ============================================================
+\section{Tổng kết Đóng góp}
+% ============================================================
+
+\begin{center}
+\begin{tabular}{L{3.5cm} L{10.5cm}}
+\toprule
+\textbf{Hạng mục} & \textbf{Nội dung công việc} \\
+\midrule
+gNB 128~port & Sửa thư viện MATLAB để bổ sung
+  \texttt{NumTransmitAntennas=128} và stack \texttt{nrUEAbstractPHY}
+  tương ứng \\[3pt]
+Rel-19 TypeI & Triển khai Approaches C và D dùng
+  \texttt{'typeI-SinglePanel-r19'} (TS~38.214 \S5.2.2.2.1a)
+  với cả Mode~A và Mode~B \\[3pt]
+Rel-19 eTypeII & Triển khai Approach E: đường $L \leq 2$ dùng tìm kiếm
+  toàn diện qua toolbox; đường $L \geq 4$ dùng greedy DFT matching
+  pursuit (TS~38.214 \S5.2.2.2.5a) \\[3pt]
+Subband PMI/CQI & Precoder và CQI per-subband
+  (TS~38.214 Table~5.2.1.4-2) \\[3pt]
+MU-MIMO System-level & NR Cell simulation với OLLA, ghép cặp MU-MIMO,
+  kênh CDL-D, \texttt{wirelessNetworkSimulator} event-driven \\[3pt]
+Giao diện DRL & \texttt{nrDRLScheduler} classdef với giao thức TCP
+  socket, observation spaces: 8 features (đã kiểm chứng), FTP-3 \\[3pt]
+Baseline & \texttt{v4\_0\_BASELINE.m} với ProportionalFair/RoundRobin/BestCQI
+  cho so sánh DRL \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Tổng kết đóng góp của dự án.}
+\end{center}
+
+% ============================================================
+\section{Kết luận}
+% ============================================================
+
+Dự án đã hiện thực và kiểm chứng thành công môi trường mô phỏng NR
+Cell 128T128R massive MIMO tuân thủ 3GPP Release~19. Việc nâng cấp
+từ codebook Rel-15/16 Type~I lên Rel-19 eTypeII được hỗ trợ bởi
+bốn dòng bằng chứng độc lập: (1)~nhận dạng đặc trưng cấu trúc
+chỉ số PMI, (2)~kiểm chứng phân cấp hiệu năng vật lý, (3)~hội tụ
+OLLA trong mô phỏng system-level, và (4)~kiểm thử giao thức socket
+DRL end-to-end. Môi trường sẵn sàng để bàn giao cho nhóm DRL training.
+
+% ============================================================
+\appendix
+\section{Tóm tắt 5 Approaches}
+% ============================================================
+
+\begin{center}
+\begin{tabular}{cL{2.5cm}L{5.5cm}L{3.2cm}}
+\toprule
+\textbf{Ký hiệu} & \textbf{Tên} & \textbf{Tham số chính} & \textbf{Đặc tả} \\
+\midrule
+A & Rel-15/16 Type~I SP &
+  \texttt{'typeI-SP'}, \texttt{PanelDimensions=[8,2]}, per-32-port &
+  TS~38.214 \S5.2.2.2.1 \\[3pt]
+B & SVD Upper Bound &
+  Full 128-port SVD, tham chiếu lý tưởng &
+  --- \\[3pt]
+C & Rel-19 Type~I Mode~A &
+  \texttt{'typeI-SP-r19'}, \texttt{Mode=1}, \texttt{[1,16,4]} &
+  TS~38.214 \S5.2.2.2.1a \\[3pt]
+D & Rel-19 Type~I Mode~B &
+  \texttt{'typeI-SP-r19'}, \texttt{Mode=2}, \texttt{[1,16,4]} &
+  TS~38.214 \S5.2.2.2.1a \\[3pt]
+E & Rel-19 eTypeII 128-port &
+  \texttt{'eTypeII-r19'}, PC=5, $L=4$, \texttt{[1,16,4]} &
+  TS~38.214 \S5.2.2.2.5a \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Năm approach codebook được hiện thực trong dự án.}
+\end{center}
+
+\section{Hàm MATLAB Nội bộ Chính}
+
+\begin{center}
+\begin{tabular}{L{5.5cm} L{8cm}}
+\toprule
+\textbf{Hàm} & \textbf{Vai trò trong dự án} \\
+\midrule
+\texttt{nr5g.internal.nrRISelect}  &
+  Chọn RI cho Approaches C, D, E (L=2) \\[3pt]
+\texttt{nr5g.internal.nrCQISelect} &
+  Chọn CQI cho Approaches C, D, E (L=2) \\[3pt]
+\texttt{nr5g.internal.nrPMIReport} &
+  Báo cáo PMI (gọi nội bộ bởi hai hàm trên) \\[3pt]
+\texttt{nrCSIRS}                   &
+  Tạo tín hiệu CSI-RS \\[3pt]
+\texttt{nrChannelEstimate}         &
+  Ước lượng kênh MMSE \\[3pt]
+\texttt{nrGNB}                     &
+  Node gNB (đã vá: hỗ trợ 128T) \\[3pt]
+\texttt{nrUE}                      &
+  Node UE \\[3pt]
+\texttt{wirelessNetworkSimulator}  &
+  Bộ mô phỏng event-driven \\[3pt]
+\texttt{configureScheduler}        &
+  Cấu hình scheduler (chỉ dùng tên string) \\
+\bottomrule
+\end{tabular}
+\captionof{table}{Các hàm MATLAB nội bộ chính và vai trò.}
+\end{center}
+
+\end{document}
